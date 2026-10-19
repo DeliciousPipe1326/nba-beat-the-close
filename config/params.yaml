@@ -82,3 +82,41 @@ market:
   # results invalidates the comparison.
   outlier_points: 10      # drop a book whose line is this far from the cross-book median
   min_books: 3            # books needed (after the outlier rule) to score a game at an anchor
+
+ingest:
+  theodds:
+    sport: basketball_nba
+    # Book regions to request (comma-separated: us, us2, uk, eu, au). Each
+    # region multiplies the credit cost of an odds call.
+    regions: us
+    # Markets to store. Only totals feed the model; spreads and h2h are kept so
+    # you never need to refetch. Each market multiplies the credit cost.
+    markets: totals,spreads,h2h
+    # Anchors recorded before tip, in minutes. Defaults match the buckets the
+    # backtest graded (docs/RESULTS.md). `opening` (first time an event is seen)
+    # and `close` (overwritten on every pre-tip poll, so it ends as the last
+    # snapshot before tip) are always recorded. A poll records an anchor once the
+    # event is within that many minutes of tip, so the real lead depends on how
+    # often you poll; it is stored per row (lead_minutes).
+    anchors_minutes_before_tip:
+      t-10h: 600
+      t-5h: 300
+      t-3h: 180
+      t-2h: 120
+      t-1h: 60
+      t-15m: 15
+    # An event listed before any book prices it would otherwise trigger an odds
+    # call on every poll. An opening-only fetch waits this long after the last one.
+    opening_recheck_minutes: 60
+    # Refuse to spend credits when the last reported remaining quota is below this.
+    min_requests_remaining: 20
+  balldontlie:
+    per_page: 100
+    # Seconds between requests. Set it from your plan's rate limit: 12 s suits a
+    # limit of 5 requests a minute.
+    min_seconds_between_requests: 12
+
+today:
+  # Which stored anchor supplies the market line in the `today` CSV. `close`
+  # is the latest pre-tip poll, i.e. the freshest line you have.
+  market_anchor: close

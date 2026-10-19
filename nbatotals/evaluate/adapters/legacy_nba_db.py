@@ -9,7 +9,8 @@ with the ingesters in nbatotals.ingest.
 Legacy tables read (read-only):
     games            -> games
     team_game_stats  -> team_box   (possessions/pace/ratings recomputed from counts)
-    odds_truth       -> odds_snapshots  (snapshot_type noon_local -> anchor pretip)
+    odds_truth       -> odds_snapshots  (anchors stored as legacy_open, legacy_noon_local,
+                                         legacy_close: the labels are wrong, see docs/RESULTS.md)
 
 Capture times: odds_truth has none. If NBA_LEGACY_ODDS_LAKE points at the raw
 The Odds API payloads the rows were parsed from, every row is joined to its
@@ -37,7 +38,9 @@ from nbatotals.evaluate.adapters import legacy_lake
 from nbatotals.teams import BDL_ID_TO_ALIAS
 
 SOURCE = "legacy_nba_db"
-ANCHOR_MAP = {"open": "open", "noon_local": "pretip", "close": "close"}
+# The legacy labels do not describe when the snapshots were taken (docs/RESULTS.md,
+# Appendix B), so they are stored under names nobody will mistake for live anchors.
+ANCHOR_MAP = {"open": "legacy_open", "noon_local": "legacy_noon_local", "close": "legacy_close"}
 ENV_VAR = "NBA_LEGACY_DB"
 
 
@@ -238,10 +241,13 @@ def write_store(frames: dict[str, pd.DataFrame], out: str | os.PathLike) -> Path
     con = store.connect(out)
     games = frames["games"]
     box = frames["team_box"].drop(columns=["legacy_pace"])
-    odds = usable_odds(frames["odds_raw"])[
-        ["game_id", "book", "market", "anchor", "captured_utc", "nominal_hours_before", "line",
-         "over_price", "under_price", "home_price", "away_price", "source"]
-    ]
+    odds = usable_odds(frames["odds_raw"]).rename(columns={"api_game_id": "event_id"})
+    if "commence_utc" not in odds:
+        odds["commence_utc"] = None
+    lead = (pd.to_datetime(odds["commence_utc"], utc=True) - pd.to_datetime(odds["captured_utc"], utc=True))
+    odds["lead_minutes"] = lead.dt.total_seconds() / 60.0
+    odds = odds[["event_id", "game_id", "book", "market", "anchor", "captured_utc", "commence_utc", "lead_minutes",
+                 "line", "over_price", "under_price", "home_price", "away_price", "source"]]
     odds = odds[odds["game_id"].isin(games["id"])]
     games.to_sql("games", con, if_exists="append", index=False)
     box.to_sql("team_box", con, if_exists="append", index=False)
@@ -276,7 +282,7 @@ def verify(frames: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame | dict]:
         line_outside_150_300=("line", lambda s: int(((s < 150) | (s > 300)).sum())),
     )
     reg_final = final[final["postseason"] == 0]
-    close_games = set(tot.loc[(tot["anchor"] == "close") & tot["has_both_prices"], "game_id"])
+    close_games = set(tot.loc[(tot["anchor"] == "legacy_close") & tot["has_both_prices"], "game_id"])
     coverage = (
         reg_final.assign(has_close=reg_final["id"].isin(close_games))
         .groupby("season")["has_close"]

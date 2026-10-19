@@ -68,8 +68,10 @@ def predictions(games, box, base, test_seasons=TEST_SEASONS, progress=None, log_
     log, chosen, feats = fit.search(games, box, base, test_seasons, progress=progress)
     if log_path:
         Path(log_path).parent.mkdir(parents=True, exist_ok=True)
-        with gzip.open(log_path, "wt") as fh:
-            log.to_csv(fh, sep="\t", index=False, float_format="%.6f")
+        # mtime=0 keeps the file byte-identical across re-runs, so git diff shows real changes only
+        text = log.to_csv(sep="\t", index=False, float_format="%.6f")
+        with open(log_path, "wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", mtime=0) as fh:
+            fh.write(text.encode())
 
     targets = games[(games["status"] == "final") & (games["postseason"] == 0)].reset_index(drop=True)
     actual = targets.set_index("id")[["home_pts", "away_pts"]].sum(axis=1)

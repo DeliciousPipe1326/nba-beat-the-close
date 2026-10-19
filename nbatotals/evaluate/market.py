@@ -15,7 +15,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-ANCHOR_LABELS = {"open": "open", "pretip": "noon (~12h)", "close": "close"}
+ANCHOR_LABELS = {"opening": "opening", "t-10h": "T−10h", "t-5h": "T−5h", "t-3h": "T−3h", "t-2h": "T−2h",
+                 "t-1h": "T−1h", "t-15m": "T−15 min", "close": "close (last pre-tip poll)"}
 
 
 def consensus(odds: pd.DataFrame, params: dict) -> pd.DataFrame:
@@ -85,11 +86,11 @@ def sanity_table(cons: pd.DataFrame, games: pd.DataFrame, labels: dict = ANCHOR_
 
 
 def movement_table(cons: pd.DataFrame, games: pd.DataFrame, labels: dict = ANCHOR_LABELS) -> pd.DataFrame:
-    """Anchor-ordering check: how often and how far the consensus moves open -> noon -> close."""
+    """How often and how far the consensus moves between anchors (live anchor names)."""
     w = wide(cons).merge(games[games["postseason"] == 0][["id", "season"]], left_on="game_id", right_on="id")
     rows = []
     for season, x in w.groupby("season"):
-        for a, b in (("open", "close"), ("pretip", "close"), ("open", "pretip")):
+        for a, b in (("opening", "close"), ("t-10h", "close"), ("opening", "t-10h")):
             ok = x[f"line_{a}"].notna() & x[f"line_{b}"].notna()
             d = (x.loc[ok, f"line_{b}"] - x.loc[ok, f"line_{a}"])
             rows.append({"season": season, "from": labels[a], "to": labels[b], "games": int(ok.sum()),

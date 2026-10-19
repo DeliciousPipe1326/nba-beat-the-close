@@ -10,7 +10,8 @@ from pathlib import Path
 
 DEFAULT_DB = Path("data") / "nbatotals.db"
 
-ANCHORS = ("open", "pretip", "close")
+# Live anchors written by nbatotals.ingest.theodds. Offsets live in params.yaml.
+LIVE_ANCHORS = ("opening", "t-10h", "t-5h", "t-3h", "t-2h", "t-1h", "t-15m", "close")
 MARKETS = ("totals", "spreads", "h2h")
 
 SCHEMA = """
@@ -56,21 +57,26 @@ CREATE TABLE IF NOT EXISTS team_box (
 );
 
 CREATE TABLE IF NOT EXISTS odds_snapshots (
-    game_id      INTEGER NOT NULL REFERENCES games(id),
+    event_id     TEXT NOT NULL,         -- the odds provider's event id
+    game_id      INTEGER REFERENCES games(id),  -- BallDontLie id; NULL until the fixture is matched
     book         TEXT NOT NULL,
     market       TEXT NOT NULL CHECK (market IN ('totals','spreads','h2h')),
-    anchor       TEXT NOT NULL CHECK (anchor IN ('open','pretip','close')),
-    captured_utc TEXT,                  -- when the snapshot was taken; NULL if the source did not record it
-    nominal_hours_before REAL,          -- the anchor's intended lead time before tip
+    anchor       TEXT NOT NULL,         -- live: opening, t-10h ... t-15m, close; legacy: legacy_* (see docs/schema.md)
+    captured_utc TEXT,                  -- when the provider was polled; NULL only for legacy rows without a payload match
+    commence_utc TEXT,                  -- the event's scheduled tip as the provider reported it at that poll
+    lead_minutes REAL,                  -- commence_utc - captured_utc, in minutes (always > 0 for live rows)
+    home         TEXT,                  -- aliases as the provider named the teams
+    away         TEXT,
     line         REAL,                  -- totals: the total; spreads: home spread; h2h: NULL
     over_price   REAL,                  -- totals only, decimal odds
     under_price  REAL,
     home_price   REAL,                  -- spreads/h2h only, decimal odds
     away_price   REAL,
     source       TEXT NOT NULL,
-    PRIMARY KEY (game_id, book, market, anchor)
+    PRIMARY KEY (event_id, book, market, anchor)
 );
 CREATE INDEX IF NOT EXISTS ix_odds_market ON odds_snapshots(market, anchor);
+CREATE INDEX IF NOT EXISTS ix_odds_game ON odds_snapshots(game_id);
 
 CREATE TABLE IF NOT EXISTS injuries (
     observed_utc TEXT NOT NULL,

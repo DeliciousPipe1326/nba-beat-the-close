@@ -11,19 +11,11 @@ def test_schema_creates_all_tables(tmp_path):
     assert {"games", "team_box", "odds_snapshots", "injuries", "api_usage"} <= names
 
 
-def test_anchor_and_market_are_constrained(tmp_path):
+def test_market_is_constrained_and_game_id_may_wait(tmp_path):
     con = store.connect(tmp_path / "s.db")
-    con.execute(
-        "insert into games (id, game_date, season, home, away, status, source) "
-        "values (1, '2024-01-01', 2023, 'BOS', 'NYK', 'final', 't')"
-    )
+    # odds can arrive before the fixture is matched to a BallDontLie game
+    con.execute("insert into odds_snapshots (event_id, book, market, anchor, source) values ('e1', 'b', 'totals', 't-1h', 't')")
     with pytest.raises(sqlite3.IntegrityError):
         con.execute(
-            "insert into odds_snapshots (game_id, book, market, anchor, source) "
-            "values (1, 'b', 'totals', 'noon_local', 't')"
-        )
-    with pytest.raises(sqlite3.IntegrityError):
-        con.execute(
-            "insert into odds_snapshots (game_id, book, market, anchor, source) "
-            "values (1, 'b', 'props', 'close', 't')"
+            "insert into odds_snapshots (event_id, book, market, anchor, source) values ('e1', 'b', 'props', 'close', 't')"
         )

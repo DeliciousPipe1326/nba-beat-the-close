@@ -41,8 +41,8 @@ def test_verify_counts_and_flags(frames):
     assert integrity["duplicate_snapshot_keys"] == 0
     assert report["pace_check"]["rows_possessions_off_by_more_than_0.01"] == 0
     by = report["totals_by_season_anchor"]
-    assert by.loc[(2023, "close"), "line_outside_150_300"] == 1
-    assert set(by.index.get_level_values("anchor")) == {"open", "pretip", "close"}
+    assert by.loc[(2023, "legacy_close"), "line_outside_150_300"] == 1
+    assert set(by.index.get_level_values("anchor")) == {"legacy_open", "legacy_noon_local", "legacy_close"}
 
 
 def test_write_store_drops_unusable_rows(frames, tmp_path):
@@ -54,11 +54,11 @@ def test_write_store_drops_unusable_rows(frames, tmp_path):
         "select count(*) from odds_snapshots where market='totals' and (over_price is null or under_price is null)"
     ).fetchone()[0] == 0
     row = con.execute(
-        "select line, home_price, away_price from odds_snapshots where market='spreads' and game_id=101 and anchor='close'"
+        "select line, home_price, away_price from odds_snapshots where market='spreads' and game_id=101 and anchor='legacy_close'"
     ).fetchone()
     assert row[0] == -3.5 and row[1] == pytest.approx(1 + 100 / 110)  # no decimal column: American fallback
     over = con.execute(
-        "select over_price from odds_snapshots where market='totals' and game_id=101 and anchor='close' and book='draftkings'"
+        "select over_price from odds_snapshots where market='totals' and game_id=101 and anchor='legacy_close' and book='draftkings'"
     ).fetchone()[0]
     assert over == 1.89  # the provider's decimal, not the rounded American -112
 
@@ -73,15 +73,15 @@ def test_lake_join_flags_in_play_quotes(tmp_path, monkeypatch):
     assert totals["lake_match"].all()
     assert (totals["parse_mismatch"] == False).all()  # noqa: E712
     in_play = totals[totals["in_play"]]
-    assert set(zip(in_play["game_id"], in_play["anchor"])) == {(101, "open")}
+    assert set(zip(in_play["game_id"], in_play["anchor"])) == {(101, "legacy_open")}
     assert (in_play["lead_hours"] < 0).all()
-    close = totals[(totals["game_id"] == 101) & (totals["anchor"] == "close")]
+    close = totals[(totals["game_id"] == 101) & (totals["anchor"] == "legacy_close")]
     assert close["lead_hours"].iloc[0] == pytest.approx(4 + 35 / 60)
     assert frames["games"].set_index("id").loc[101, "tip_utc"] == "2023-10-24T23:30:00Z"
     usable = legacy.usable_odds(odds)
-    assert not ((usable["game_id"] == 101) & (usable["anchor"] == "open")).any()
+    assert not ((usable["game_id"] == 101) & (usable["anchor"] == "legacy_open")).any()
     report = legacy.verify(frames)
-    assert report["flags_by_season_anchor"].loc[(2023, "open"), "in_play_games"] == 1
+    assert report["flags_by_season_anchor"].loc[(2023, "legacy_open"), "in_play_games"] == 1
 
 
 def test_missing_env_var_is_a_clear_error(monkeypatch):

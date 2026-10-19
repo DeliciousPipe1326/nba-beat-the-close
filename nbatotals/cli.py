@@ -1,4 +1,12 @@
-"""Command line entry point: `python -m nbatotals <command>`."""
+"""nbatotals: transparent pace x efficiency NBA totals engine (research tool, no edge found).
+
+Typical use, with keys in .env:
+  python -m nbatotals init
+  python -m nbatotals ingest-games --season 2025
+  python -m nbatotals ingest-box --season 2025
+  python -m nbatotals poll-odds          # schedule every 5-10 minutes
+  python -m nbatotals today
+"""
 
 from __future__ import annotations
 
@@ -10,9 +18,36 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _today_eastern() -> str:
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+
+    return dt.datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+
+
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="nbatotals", description=__doc__)
+    p = argparse.ArgumentParser(prog="nbatotals", description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="command", required=True)
+
+    def with_db(sp):
+        sp.add_argument("--db", default=str(ROOT / "data" / "nbatotals.db"), help="local SQLite store (git-ignored)")
+        sp.add_argument("--params", default=None, help="params.yaml to use (default config/params.yaml)")
+        return sp
+
+    with_db(sub.add_parser("init", help="create the local store"))
+    g = with_db(sub.add_parser("ingest-games", help="BallDontLie fixtures and finals into the store"))
+    g.add_argument("--season", type=int, action="append", help="season start year, e.g. 2025 for 2025-26 (repeatable)")
+    g.add_argument("--date", action="append", help="YYYY-MM-DD (repeatable)")
+    b = with_db(sub.add_parser("ingest-box", help="BallDontLie team box scores for final games missing one"))
+    b.add_argument("--season", type=int, action="append")
+    b.add_argument("--date", action="append")
+    with_db(sub.add_parser("ingest-injuries", help="BallDontLie injury report snapshot (plan permitting)"))
+    o = with_db(sub.add_parser("poll-odds", help="The Odds API: record any due anchors (run on a schedule)"))
+    o.add_argument("--force", action="store_true", help="fetch odds even if no anchor is due (costs credits)")
+    t = with_db(sub.add_parser("today", help="write the research CSV for a date's fixtures"))
+    t.add_argument("--date", default=None, help="YYYY-MM-DD, default today (US Eastern)")
+    t.add_argument("--out", default=None, help="CSV path, default out/today_<date>.csv (git-ignored)")
     sub.add_parser("verify-legacy", help="read $NBA_LEGACY_DB and print row-count checks")
     bt = sub.add_parser("backtest", help="walk-forward backtest (docs/RESULTS.md)")
     bt.add_argument("--legacy", action="store_true", required=True,
@@ -83,8 +118,57 @@ def cmd_backtest(args) -> int:
     return 0
 
 
+def cmd_store(args) -> int:
+    import json
+
+    from nbatotals import params as P
+    from nbatotals import store
+    from nbatotals.ingest import balldontlie, common, theodds
+
+    prm = P.load(args.params)
+    con = store.connect(args.db)
+    try:
+        if args.command == "init":
+            print(f"store ready: {args.db}")
+        elif args.command in ("ingest-games", "ingest-box", "ingest-injuries"):
+            client = balldontlie.Client(prm)
+            if args.command == "ingest-games":
+                if not (args.season or args.date):
+                    args.date = [_today_eastern()]
+                n = balldontlie.ingest_games(con, client, dates=args.date, seasons=args.season)
+                fixed = theodds.resolve_game_ids(con)
+                con.commit()
+                print(f"games upserted: {n}; odds rows matched to games: {fixed}")
+            elif args.command == "ingest-box":
+                n = balldontlie.ingest_box(con, client, dates=args.date, seasons=args.season)
+                print(f"team box rows written: {n}")
+            else:
+                print(f"injury rows written: {balldontlie.ingest_injuries(con, client)}")
+        elif args.command == "poll-odds":
+            print(json.dumps(theodds.poll(con, prm, force=args.force), indent=2, default=str))
+        elif args.command == "today":
+            from nbatotals import today
+
+            date = args.date or _today_eastern()
+            out = Path(args.out or ROOT / "out" / f"today_{date}.csv")
+            out.parent.mkdir(parents=True, exist_ok=True)
+            df = today.build(con, date, prm)
+            today.write_csv(df, out)
+            print(today.HEADER)
+            print(df.to_string(index=False) if len(df) else f"no fixtures for {date} in the store; run ingest-games")
+            print(f"\nwritten: {out}")
+    except (common.MissingKey, common.ApiError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        con.close()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command in ("init", "ingest-games", "ingest-box", "ingest-injuries", "poll-odds", "today"):
+        return cmd_store(args)
     if args.command == "verify-legacy":
         from nbatotals.evaluate.adapters import legacy_nba_db
 
