@@ -159,3 +159,11 @@ against 0.39 before the in-play rows were removed. Mean absolute move to the
 close: open 1.8 to 2.1 points, noon_local 1.6 to 2.0. The open covers only 379
 to 622 games a season, so open-anchor CLV rests on about 1,650 test-season
 games.
+
+## Amendment: anchors rebuilt from the raw payloads (fixed before grading)
+
+The "Anchor timing, measured" rules above are superseded before any grading by
+Amendment 1 in [PREREGISTRATION.md](PREREGISTRATION.md): early (~23h),
+overnight (~17h) and afternoon (~6h) anchors rebuilt per game from UTC
+partition D's three files, pre-tip snapshots only, primary comparison
+afternoon (~6h), CLV early → afternoon and overnight → afternoon.

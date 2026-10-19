@@ -139,3 +139,36 @@ Treat it as a bug first. Check, and write down in RESULTS.md that we checked:
 the game join (dates, home/away), the anchor timestamps (is "open" earlier than
 "close"?), the devig arithmetic, push handling, and the point-in-time feature
 cut-off (the leakage self-test in `tests/`).
+
+## Amendment 1 (20 October 2026, before any betting metric was computed)
+
+Reason: the legacy odds anchors are mislabelled. Capture times measured from the
+raw The Odds API payloads (see docs/RESULTS.md, "Legacy anchors are mislabelled")
+show the legacy "open" is mostly in-play, "noon_local" is an overnight snapshot
+(~17 h before tip) and "close" is taken about six hours before tip (and during
+play for afternoon tips). No true closing line exists for 2021-22 to 2024-25.
+The orchestrating review session directed this change; the expectations,
+evidence bar, consensus, grading rules, thresholds and declared search grid are
+unchanged. Only the market anchors change:
+
+1. Anchors are rebuilt from the raw payloads, not from the legacy `odds_truth`
+   table. Each event is matched to a game by its `commence_time` converted to a
+   US Eastern date plus home and away team names mapped to aliases. For a game
+   on Eastern date D the provider was polled three times in UTC partition D:
+   - **early (~23h)**: the 01:25 UTC file (legacy "open" partition D);
+   - **overnight (~17h)**: the 07:25 UTC file (legacy "noon_local");
+   - **afternoon (~6h)**: the 18:55 UTC file (legacy "close").
+   Files from other partitions are ignored, including partition D+1's 01:25 UTC
+   file, which shows day-D games in play (or, for late tips, up to about 2 h
+   before tip).
+2. A snapshot counts only if its file timestamp is before the game's
+   `commence_time`. A book is dropped if its `last_update` is after
+   `commence_time`, or if its over and under points differ.
+3. **The primary comparison is the afternoon (~6h) consensus**, named exactly
+   that, never "close". An afternoon snapshot with a lead under 1 hour is
+   dropped, and the game is counted as excluded from the primary comparison.
+4. CLV runs from early and from overnight to afternoon. It measures line
+   movement up to about six hours before tip, not to the close. A true-close
+   test needs live collection from 2025-26 on.
+5. Stop rule: if early's consensus MAE against the actual total is below
+   afternoon's, grading stops and the problem is reported.
