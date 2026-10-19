@@ -17,10 +17,6 @@ import pandas as pd
 
 ANCHOR_LABELS = {"open": "open", "pretip": "noon (~12h)", "close": "close"}
 
-# Labels for the legacy backtest, from measured capture times (docs/RESULTS.md).
-# The legacy "noon_local" snapshot is taken around 02:25 ET, ~17 h before tip.
-LEGACY_ANCHOR_LABELS = {"open": "open (~23h)", "pretip": "noon_local (~17h)", "close": "close (~6h)"}
-
 
 def consensus(odds: pd.DataFrame, params: dict) -> pd.DataFrame:
     m = params["market"]
@@ -54,16 +50,17 @@ def wide(cons: pd.DataFrame) -> pd.DataFrame:
     return w.reset_index()
 
 
-def enforce_anchor_order(cons: pd.DataFrame) -> tuple[pd.DataFrame, int]:
-    """Drop an open consensus captured at or after the same game's close capture.
+def enforce_anchor_order(cons: pd.DataFrame, ref: str) -> tuple[pd.DataFrame, int]:
+    """Drop any other anchor's consensus captured at or after the same game's `ref` capture.
 
-    An "open" must precede the close it is measured against. Uses capture
-    times only, never outcomes. Returns the kept rows and the number dropped.
+    An anchor that CLV is measured from must precede the reference it is
+    measured against. Uses capture times only, never outcomes. Returns the kept
+    rows and the number dropped.
     """
     if "captured_utc" not in cons or cons["captured_utc"].isna().all():
         return cons, 0
-    close_at = cons[cons["anchor"] == "close"].set_index("game_id")["captured_utc"]
-    later = (cons["anchor"] == "open") & (cons["captured_utc"] >= cons["game_id"].map(close_at))
+    ref_at = cons[cons["anchor"] == ref].set_index("game_id")["captured_utc"]
+    later = (cons["anchor"] != ref) & (cons["captured_utc"] >= cons["game_id"].map(ref_at))
     return cons[~later].reset_index(drop=True), int(later.sum())
 
 

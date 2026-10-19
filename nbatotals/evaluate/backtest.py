@@ -13,17 +13,46 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from dataclasses import dataclass, field
+
 from nbatotals.evaluate import fit, market, metrics
 from nbatotals.model.projection import project
 
+
+@dataclass(frozen=True)
+class MarketSpec:
+    """Which anchors exist, which is the primary comparison and CLV target (`ref`),
+    which anchors CLV is measured from, and which one stands in for the
+    pre-registration's "pretip" CLV criterion."""
+    anchors: tuple
+    ref: str
+    clv_from: tuple
+    pretip: str
+    headline_clv: tuple = ()
+    labels: dict = field(default_factory=dict)
+
+
+# Pre-registration Amendment 2: multi-region payloads with a true close.
+TRUE_CLOSE = MarketSpec(
+    anchors=("opening", "noon", "afternoon", "early_evening", "late_evening", "near_close", "true_close"),
+    ref="true_close",
+    clv_from=("opening", "noon", "afternoon", "early_evening", "late_evening", "near_close"),
+    pretip="noon",
+    headline_clv=("opening", "noon"),
+    labels={"opening": "opening (~24h)", "noon": "noon (~10h)", "afternoon": "afternoon (~5h)",
+            "early_evening": "early evening (~3h)", "late_evening": "late evening (~2h)",
+            "near_close": "near close (~1h)", "true_close": "true close (T−15 min)"},
+)
+# Pre-registration Amendment 1: temporal payloads, no close (cross-check only).
+TEMPORAL = MarketSpec(
+    anchors=("early", "overnight", "afternoon"), ref="afternoon", clv_from=("early", "overnight"),
+    pretip="overnight",
+    headline_clv=("early", "overnight"),
+    labels={"early": "early (~23h)", "overnight": "overnight (~17h)", "afternoon": "afternoon (~6h)"},
+)
+
 TEST_SEASONS = (2022, 2023, 2024)
 THRESHOLDS = (0, 1, 2, 3, 4, 6)
-# Legacy anchors (pre-registration Amendment 1). REF is the primary comparison
-# and the CLV target; it is the last pre-tip snapshot, about six hours out.
-ANCHORS = ("early", "overnight", "afternoon")
-REF = "afternoon"
-CLV_FROM = ("early", "overnight")
-LABELS = {"early": "early (~23h)", "overnight": "overnight (~17h)", "afternoon": "afternoon (~6h)"}
 BREAKEVEN_110 = 110 / 210
 DEFAULT_POINT = dict(l3=0.3, l10=0.5, season=0.2, shrinkage=5, pace_weight=1.0, home_court_total=0, b2b_total_per_team=0)
 
@@ -83,7 +112,7 @@ def predictions(games, box, base, test_seasons=TEST_SEASONS, progress=None, log_
 
 # --------------------------------------------------------------------------- grading
 
-def _bets(pred: pd.DataFrame, w: pd.DataFrame, anchor: str, proj_col: str) -> pd.DataFrame:
+def _bets(pred: pd.DataFrame, w: pd.DataFrame, anchor: str, proj_col: str, spec: MarketSpec = TRUE_CLOSE) -> pd.DataFrame:
     d = pred.merge(w, on="game_id", how="inner")
     d = d[d[f"line_{anchor}"].notna()].copy()
     line = d[f"line_{anchor}"]
@@ -96,8 +125,8 @@ def _bets(pred: pd.DataFrame, w: pd.DataFrame, anchor: str, proj_col: str) -> pd
     d["price"] = np.where(d["over"], d[f"over_price_{anchor}"], d[f"under_price_{anchor}"])
     d["fair_ret"] = np.where(d["win"], 1 / d["p_side"] - 1, -1.0)
     d["real_ret"] = np.where(d["win"], d["price"] - 1, -1.0)
-    if anchor != REF:
-        ref_line = d[f"line_{REF}"]
+    if anchor != spec.ref:
+        ref_line = d[f"line_{spec.ref}"]
         has_close = ref_line.notna()
         d["clv_pts"] = np.where(d["over"], ref_line - line, line - ref_line).astype(float)
         d.loc[~has_close, "clv_pts"] = np.nan
@@ -105,13 +134,13 @@ def _bets(pred: pd.DataFrame, w: pd.DataFrame, anchor: str, proj_col: str) -> pd
         if has_close.any():
             p_over_close_at[has_close.to_numpy()] = metrics.prob_over_at(
                 line[has_close].to_numpy(), ref_line[has_close].to_numpy(),
-                d.loc[has_close, f"p_over_{REF}"].to_numpy(dtype=float))
+                d.loc[has_close, f"p_over_{spec.ref}"].to_numpy(dtype=float))
         p_close_side = np.where(d["over"], p_over_close_at, 1 - p_over_close_at)
         d["clv_cents"] = 100 * (p_close_side - d["p_side"])
     return d
 
 
-def _grade(d: pd.DataFrame, anchor: str) -> dict:
+def _grade(d: pd.DataFrame, anchor: str, spec: MarketSpec = TRUE_CLOSE) -> dict:
     graded = d[~d["push"]]
     n = len(graded)
     wins = int(graded["win"].sum())
@@ -125,7 +154,7 @@ def _grade(d: pd.DataFrame, anchor: str) -> dict:
     }
     out["fair_lo"], out["fair_hi"] = metrics.bootstrap_mean_ci(graded["fair_ret"])
     out["real_lo"], out["real_hi"] = metrics.bootstrap_mean_ci(graded["real_ret"])
-    if anchor != REF:
+    if anchor != spec.ref:
         c = d["clv_pts"].dropna()
         out["clv_n"] = len(c)
         out["clv_pts"] = float(c.mean()) if len(c) else np.nan
@@ -136,11 +165,11 @@ def _grade(d: pd.DataFrame, anchor: str) -> dict:
     return out
 
 
-def grading(pred: pd.DataFrame, w: pd.DataFrame) -> pd.DataFrame:
+def grading(pred: pd.DataFrame, w: pd.DataFrame, spec: MarketSpec = TRUE_CLOSE) -> pd.DataFrame:
     rows = []
     for run, col in (("tuned", "proj"), ("default", "proj_default")):
-        for anchor in ANCHORS:
-            bets = _bets(pred, w, anchor, col)
+        for anchor in spec.anchors:
+            bets = _bets(pred, w, anchor, col, spec)
             for cut in ("all", "both_10"):
                 b = bets if cut == "all" else bets[bets["both_10"]]
                 for t in THRESHOLDS:
@@ -148,19 +177,19 @@ def grading(pred: pd.DataFrame, w: pd.DataFrame) -> pd.DataFrame:
                     for s in list(TEST_SEASONS) + ["pooled"]:
                         x = bt if s == "pooled" else bt[bt["season"] == s]
                         rows.append({"run": run, "anchor": anchor, "cut": cut, "threshold": t, "season": s,
-                                     **_grade(x, anchor)})
+                                     **_grade(x, anchor, spec)})
     return pd.DataFrame(rows)
 
 
 # --------------------------------------------------------------------------- information tests
 
-def accuracy(pred: pd.DataFrame, w: pd.DataFrame) -> pd.DataFrame:
+def accuracy(pred: pd.DataFrame, w: pd.DataFrame, spec: MarketSpec = TRUE_CLOSE) -> pd.DataFrame:
     d = pred.merge(w, on="game_id", how="left")
     rows = []
     for s in list(TEST_SEASONS) + ["pooled"]:
         x = d if s == "pooled" else d[d["season"] == s]
         row = {"season": s}
-        for anchor in ANCHORS:
+        for anchor in spec.anchors:
             y = x[x[f"line_{anchor}"].notna()]
             row[f"n_{anchor}"] = len(y)
             for name, col in (("proj", "proj"), ("default", "proj_default"), ("line", f"line_{anchor}")):
@@ -171,34 +200,34 @@ def accuracy(pred: pd.DataFrame, w: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def blend_regression(pred: pd.DataFrame, w: pd.DataFrame) -> pd.DataFrame:
+def blend_regression(pred: pd.DataFrame, w: pd.DataFrame, spec: MarketSpec = TRUE_CLOSE) -> pd.DataFrame:
     d = pred.merge(w, on="game_id")
-    d = d[d[f"line_{REF}"].notna()]
+    d = d[d[f"line_{spec.ref}"].notna()]
     rows = []
     for run, col in (("tuned", "proj"), ("default", "proj_default")):
         for s in list(TEST_SEASONS) + ["pooled"]:
             x = d if s == "pooled" else d[d["season"] == s]
-            r = metrics.ols(x["actual"], {"market": x[f"line_{REF}"], "model": x[col]})
+            r = metrics.ols(x["actual"], {"market": x[f"line_{spec.ref}"], "model": x[col]})
             rows.append({"run": run, "season": s, "n": r["n"],
                          **{f"{k}_{m}": r[k][m] for k in ("const", "market", "model") for m in ("coef", "lo", "hi")}})
     return pd.DataFrame(rows)
 
 
-def edge_vs_move(pred: pd.DataFrame, w: pd.DataFrame) -> pd.DataFrame:
+def edge_vs_move(pred: pd.DataFrame, w: pd.DataFrame, spec: MarketSpec = TRUE_CLOSE) -> pd.DataFrame:
     d = pred.merge(w, on="game_id")
     rows = []
-    for anchor in CLV_FROM:
-        y = d[d[f"line_{anchor}"].notna() & d[f"line_{REF}"].notna()]
+    for anchor in spec.clv_from:
+        y = d[d[f"line_{anchor}"].notna() & d[f"line_{spec.ref}"].notna()]
         for s in list(TEST_SEASONS) + ["pooled"]:
             x = y if s == "pooled" else y[y["season"] == s]
-            r, lo, hi, n = metrics.corr_ci(x["proj"] - x[f"line_{anchor}"], x[f"line_{REF}"] - x[f"line_{anchor}"])
+            r, lo, hi, n = metrics.corr_ci(x["proj"] - x[f"line_{anchor}"], x[f"line_{spec.ref}"] - x[f"line_{anchor}"])
             rows.append({"anchor": anchor, "season": s, "n": n, "r": r, "lo": lo, "hi": hi})
     return pd.DataFrame(rows)
 
 
-def evidence(g: pd.DataFrame) -> dict:
+def evidence(g: pd.DataFrame, spec: MarketSpec = TRUE_CLOSE) -> dict:
     """The pre-registered evidence bar, evaluated on the primary cell."""
-    prim = g[(g["run"] == "tuned") & (g["anchor"] == REF) & (g["cut"] == "all") & (g["threshold"] == 0)]
+    prim = g[(g["run"] == "tuned") & (g["anchor"] == spec.ref) & (g["cut"] == "all") & (g["threshold"] == 0)]
     pooled = prim[prim["season"] == "pooled"].iloc[0]
     per = prim[prim["season"] != "pooled"]
     out = {
@@ -207,35 +236,57 @@ def evidence(g: pd.DataFrame) -> dict:
         "c1_each_season_above_50": bool((per["cover"] > 0.5).all()),
         "c3_real_roi_ci_above_0": bool(pooled["real_lo"] > 0),
     }
-    for anchor in CLV_FROM:
+    for anchor in spec.clv_from:
         c = g[(g["run"] == "tuned") & (g["anchor"] == anchor) & (g["cut"] == "all") & (g["threshold"] == 0)
               & (g["season"] == "pooled")].iloc[0]
         out[f"c2_clv_{anchor}_ci_above_0"] = bool(c["clv_lo"] > 0)
-    # The pre-registered CLV criterion names the pretip anchor; in the legacy data that is overnight (~17h).
+    # The pre-registered CLV criterion names the pretip anchor; spec.pretip says which anchor stands in for it.
     out["edge"] = (out["c1_lower_bound_above_52.38"] and out["c1_each_season_above_50"]
-                   and out["c2_clv_overnight_ci_above_0"] and out["c3_real_roi_ci_above_0"])
+                   and out[f"c2_clv_{spec.pretip}_ci_above_0"] and out["c3_real_roi_ci_above_0"])
     flags = g[(g["n"] >= 1) & ((g["cover_lo"] > BREAKEVEN_110) | (g.get("clv_lo", pd.Series(dtype=float)) > 0))]
     out["cells_clearing_a_bar"] = flags[["run", "anchor", "cut", "threshold", "season", "n", "cover", "cover_lo",
                                          "clv_pts", "clv_lo"]]
     return out
 
 
-def run(games, box, odds, base, labels=LABELS, progress=None, log_path=None, fitted=None) -> dict:
+def pinnacle_grading(pred: pd.DataFrame, odds: pd.DataFrame, base: dict, spec: MarketSpec) -> pd.DataFrame:
+    """Secondary: grade against Pinnacle's own line and devigged price at the reference anchor."""
+    from nbatotals import params as P
+
+    pin = odds[(odds["book"] == "pinnacle") & (odds["anchor"] == spec.ref)]
+    cons = market.consensus(pin, P.with_overrides(base, {"market.min_books": 1}))
+    bets = _bets(pred, market.wide(cons), spec.ref, "proj", spec)
+    rows = []
+    for t in THRESHOLDS:
+        bt = bets[bets["edge"] != 0] if t == 0 else bets[bets["edge"].abs() >= t]
+        for s in list(TEST_SEASONS) + ["pooled"]:
+            x = bt if s == "pooled" else bt[bt["season"] == s]
+            rows.append({"threshold": t, "season": s, **_grade(x, spec.ref, spec)})
+    return pd.DataFrame(rows)
+
+
+def run(games, box, odds, base, spec: MarketSpec = TRUE_CLOSE, progress=None, log_path=None, fitted=None) -> dict:
     """`fitted` = (pred, fits, log_rows) from an earlier `predictions` call, to skip the odds-free grid."""
     cons = market.consensus(odds, base)
+    cons, order_dropped = market.enforce_anchor_order(cons, spec.ref)
     w = market.wide(cons)
     if fitted is None:
         pred, fits, log = predictions(games, box, base, progress=progress, log_path=log_path)
         fitted = (pred, fits, len(log))
     pred, fits, log_rows = fitted
-    g = grading(pred, w)
-    return {
-        "labels": labels, "fitted": fitted,
-        "sanity": market.sanity_table(cons, games[games["season"] <= max(TEST_SEASONS)], labels),
+    g = grading(pred, w, spec)
+    sanity = market.sanity_table(cons, games[games["season"] <= max(TEST_SEASONS)], spec.labels)
+    order = {v: i for i, v in enumerate(spec.labels[a] for a in spec.anchors)}
+    sanity = sanity.sort_values(["season", "anchor"], key=lambda c: c.map(order) if c.name == "anchor" else c)
+    out = {
+        "spec": spec, "labels": spec.labels, "fitted": fitted, "sanity": sanity, "order_dropped": order_dropped,
         "fits": fits, "log_rows": log_rows, "pred": pred, "grading": g,
-        "accuracy": accuracy(pred, w), "regression": blend_regression(pred, w),
-        "edge_move": edge_vs_move(pred, w), "evidence": evidence(g),
+        "accuracy": accuracy(pred, w, spec), "regression": blend_regression(pred, w, spec),
+        "edge_move": edge_vs_move(pred, w, spec), "evidence": evidence(g, spec),
     }
+    if (odds["book"] == "pinnacle").any():
+        out["pinnacle"] = pinnacle_grading(pred, odds, base, spec)
+    return out
 
 
 # --------------------------------------------------------------------------- markdown
@@ -255,33 +306,62 @@ def _table(header, rows) -> str:
 
 
 def headline_table(res: dict) -> str:
+    spec = res["spec"]
     g = res["grading"]
     rows = []
     for s in list(TEST_SEASONS) + ["pooled"]:
-        c = g[(g.run == "tuned") & (g.anchor == REF) & (g.cut == "all") & (g.threshold == 0) & (g.season == s)].iloc[0]
+        c = g[(g.run == "tuned") & (g.anchor == spec.ref) & (g.cut == "all") & (g.threshold == 0) & (g.season == s)].iloc[0]
         row = [season_label(s), f"{int(c.n):,}", f"{_pct(c.cover)} ({_pct(c.cover_lo)}–{_pct(c.cover_hi)})",
                _pct(c.baseline), f"{_pct(c.fair_roi)} ({_pct(c.fair_lo)} to {_pct(c.fair_hi)})",
                f"{_pct(c.real_roi)} ({_pct(c.real_lo)} to {_pct(c.real_hi)})"]
-        for a in CLV_FROM:
+        for a in spec.headline_clv:
             o = g[(g.run == "tuned") & (g.anchor == a) & (g.cut == "all") & (g.threshold == 0) & (g.season == s)].iloc[0]
             row += [f"{int(o.clv_n):,}", f"{o.clv_pts:+.2f} ({o.clv_lo:+.2f} to {o.clv_hi:+.2f})"]
         rows.append(row)
-    head = ["season", f"n ({LABELS[REF]})", "cover (95% Wilson)", "no-info baseline", "fair ROI (95% CI)",
+    head = ["season", f"n ({spec.labels[spec.ref]})", "cover (95% Wilson)", "no-info baseline", "fair ROI (95% CI)",
             "real ROI (95% CI)"]
-    for a in CLV_FROM:
-        head += [f"{LABELS[a]} bets", f"CLV {a} → {REF}, points (95% CI)"]
+    for a in spec.headline_clv:
+        head += [f"{spec.labels[a]} bets", f"CLV {a} → {spec.ref}, points (95% CI)"]
     return _table(head, rows)
 
 
+def clv_table(res: dict) -> str:
+    """CLV of threshold-0 bets struck at each earlier anchor, measured to the reference anchor."""
+    spec = res["spec"]
+    g = res["grading"]
+    g = g[(g.run == "tuned") & (g.cut == "all") & (g.threshold == 0)]
+    rows = []
+    for a in spec.clv_from:
+        for s in list(TEST_SEASONS) + ["pooled"]:
+            c = g[(g.anchor == a) & (g.season == s)].iloc[0]
+            rows.append([spec.labels[a], season_label(s), f"{int(c.clv_n):,}",
+                         f"{c.clv_pts:+.2f} ({c.clv_lo:+.2f} to {c.clv_hi:+.2f})",
+                         f"{c.clv_cents:+.2f}¢ ({c.clv_cents_lo:+.2f} to {c.clv_cents_hi:+.2f})",
+                         f"{_pct(c.cover)} ({_pct(c.cover_lo)}–{_pct(c.cover_hi)})", _pct(c.real_roi)])
+    return _table(["bet struck at", "season", "bets", f"CLV to {spec.labels[spec.ref]}, points (95% CI)",
+                   "CLV, cents (95% CI)", "cover at that anchor (95% Wilson)", "real ROI at that anchor"], rows)
+
+
+def pinnacle_table(res: dict) -> str:
+    p = res["pinnacle"]
+    rows = [[x.threshold, season_label(x.season), f"{int(x.n):,}", int(x.pushes),
+             f"{_pct(x.cover)} ({_pct(x.cover_lo)}–{_pct(x.cover_hi)})", _pct(x.baseline),
+             f"{_pct(x.fair_roi)} ({_pct(x.fair_lo)} to {_pct(x.fair_hi)})",
+             f"{_pct(x.real_roi)} ({_pct(x.real_lo)} to {_pct(x.real_hi)})"] for x in p.itertuples()]
+    return _table(["edge ≥", "season", "n", "pushes", "cover (95% Wilson)", "baseline", "fair ROI at Pinnacle's devigged price (CI)",
+                   "ROI at Pinnacle's own price (CI)"], rows)
+
+
 def grading_table(res: dict, run="tuned", cut="all") -> str:
+    spec = res["spec"]
     g = res["grading"]
     g = g[(g.run == run) & (g.cut == cut)]
     rows = []
-    for anchor in ANCHORS:
+    for anchor in spec.anchors:
         for t in THRESHOLDS:
             for s in list(TEST_SEASONS) + ["pooled"]:
                 c = g[(g.anchor == anchor) & (g.threshold == t) & (g.season == s)].iloc[0]
-                clv = "n/a" if anchor == REF else (
+                clv = "n/a" if anchor == spec.ref else (
                     f"{c.clv_pts:+.2f} ({c.clv_lo:+.2f}, {c.clv_hi:+.2f}); {c.clv_cents:+.2f}¢" if c.clv_n else "–")
                 rows.append([res["labels"][anchor], t, season_label(s), f"{int(c.n):,}", int(c.pushes),
                              f"{_pct(c.cover)} ({_pct(c.cover_lo)}–{_pct(c.cover_hi)})", _pct(c.baseline),
@@ -303,11 +383,12 @@ def fit_table(res: dict) -> str:
 
 
 def accuracy_table(res: dict) -> str:
+    spec = res["spec"]
     a = res["accuracy"]
     L = res["labels"]
     rows = []
     for r in a.itertuples():
-        for anchor in (REF,) + CLV_FROM:
+        for anchor in (spec.ref,) + spec.clv_from:
             rows.append([season_label(r.season), L[anchor], f"{getattr(r, f'n_{anchor}'):,}",
                          f"{getattr(r, f'mae_proj_{anchor}'):.2f}", f"{getattr(r, f'mae_default_{anchor}'):.2f}",
                          f"{getattr(r, f'mae_line_{anchor}'):.2f}", f"{getattr(r, f'rmse_proj_{anchor}'):.2f}",
@@ -317,19 +398,21 @@ def accuracy_table(res: dict) -> str:
 
 
 def regression_table(res: dict) -> str:
+    spec = res["spec"]
     r = res["regression"]
     rows = [[x.run, season_label(x.season), f"{x.n:,}", f"{x.const_coef:+.1f} ({x.const_lo:+.1f}, {x.const_hi:+.1f})",
              f"{x.market_coef:.3f} ({x.market_lo:.3f}, {x.market_hi:.3f})",
              f"{x.model_coef:+.3f} ({x.model_lo:+.3f}, {x.model_hi:+.3f})"] for x in r.itertuples()]
-    return _table(["model run", "season", "n", "intercept (95% CI)", f"b: {LABELS[REF]} line (95% CI)",
+    return _table(["model run", "season", "n", "intercept (95% CI)", f"b: {spec.labels[spec.ref]} line (95% CI)",
                    "c: model (95% CI)"], rows)
 
 
 def edge_move_table(res: dict) -> str:
+    spec = res["spec"]
     e = res["edge_move"]
     rows = [[res["labels"][x.anchor], season_label(x.season), f"{x.n:,}", f"{x.r:+.3f} ({x.lo:+.3f}, {x.hi:+.3f})"]
             for x in e.itertuples()]
-    return _table(["bet anchor", "season", "n", f"corr(model − anchor line, {REF} line − anchor line) (95% CI)"], rows)
+    return _table(["bet anchor", "season", "n", f"corr(model − anchor line, {spec.ref} line − anchor line) (95% CI)"], rows)
 
 
 def sanity_markdown(res: dict) -> str:
@@ -342,22 +425,27 @@ def sanity_markdown(res: dict) -> str:
 
 
 def report_markdown(res: dict) -> str:
+    spec = res["spec"]
     ev = res["evidence"]
     flagged = ev["cells_clearing_a_bar"]
-    flagged_rows = [[x.run, LABELS[x.anchor], x.cut, x.threshold, season_label(x.season), f"{int(x.n):,}",
+    flagged_rows = [[x.run, spec.labels[x.anchor], x.cut, x.threshold, season_label(x.season), f"{int(x.n):,}",
                      f"{_pct(x.cover)} (lo {_pct(x.cover_lo)})",
                      "n/a" if pd.isna(x.clv_pts) else f"{x.clv_pts:+.2f} (lo {x.clv_lo:+.2f})"]
                     for x in flagged.itertuples()]
-    counts = res.get("anchor_counts")
+    counts = dict(res.get("anchor_counts") or {})
+    counts["consensus_rows_captured_at_or_after_the_reference"] = res.get("order_dropped", 0)
     parts = [
         "## Anchor construction counts",
         _table(["count", "value"], [[k, f"{v:,}"] for k, v in counts.items()]) if counts else "(not available)",
         "## Market sanity", sanity_markdown(res),
         "## Walk-forward fit", fit_table(res),
         f"Grid evaluations logged: {res['log_rows']:,}.",
-        f"## Headline (primary cell: tuned model, {LABELS[REF]}, every game)", headline_table(res),
+        f"## Headline (primary cell: tuned model, {spec.labels[spec.ref]}, every game)", headline_table(res),
+        f"## CLV by anchor (tuned model, every game, all bets), measured to {spec.labels[spec.ref]}", clv_table(res),
+        *([f"## Pinnacle only: tuned model against Pinnacle's own {spec.labels[spec.ref]} line and price "
+           "(games where Pinnacle quotes a total)", pinnacle_table(res)] if "pinnacle" in res else []),
         "## Projection accuracy", accuracy_table(res),
-        f"## Market + model blend regression: actual = a + b·{REF} line + c·model", regression_table(res),
+        f"## Market + model blend regression: actual = a + b·{spec.ref} line + c·model", regression_table(res),
         "## Does the model's edge predict the line move?", edge_move_table(res),
         "## Pre-registered evidence bar",
         _table(["criterion", "met"], [[k, v] for k, v in ev.items() if k != "cells_clearing_a_bar"]),

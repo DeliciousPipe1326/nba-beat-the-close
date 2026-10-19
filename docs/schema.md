@@ -90,6 +90,13 @@ raw payloads by measured capture time
 defect"). When `NBA_LEGACY_ODDS_LAKE` is set, the legacy adapter also stamps
 each legacy row with its real capture time and drops in-play rows.
 
+The primary backtest uses a second, better legacy source: multi-region payloads
+polled at seven fixed offsets before each tip, down to a true close 15 minutes
+out (`nbatotals/evaluate/adapters/legacy_multiregion.py`, path from
+`NBA_LEGACY_MULTIREGION`). Its quotes are built in memory in the
+`odds_snapshots` shape with `anchor` set to the bucket name, so they are not
+written to the store, whose `anchor` column is limited to the live anchors.
+
 ## injuries
 
 | column | meaning |

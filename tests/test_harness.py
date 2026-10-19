@@ -47,12 +47,12 @@ def test_grading_rules_on_hand_built_bets():
     w = pd.DataFrame({"game_id": [1, 2, 3, 4], "line_afternoon": [225.0, 212.0, 224.0, 221.0],
                       "p_over_afternoon": 0.5, "p_under_afternoon": 0.5, "over_price_afternoon": 1.91,
                       "under_price_afternoon": 1.91})
-    d = backtest._bets(pred, w, "afternoon", "proj")
+    d = backtest._bets(pred, w, "afternoon", "proj", backtest.TEMPORAL)
     # game 1: over 225, actual 228 -> win; game 2: under 212, actual 215 -> loss;
     # game 3: over 224, actual 224 -> push; game 4: under 221, actual 220 -> win
     assert d["over"].tolist() == [True, False, True, False]
     assert d["push"].tolist() == [False, False, True, False]
-    r = backtest._grade(d, "afternoon")
+    r = backtest._grade(d, "afternoon", backtest.TEMPORAL)
     assert (r["n"], r["wins"], r["pushes"]) == (3, 2, 1)
     assert r["fair_roi"] == pytest.approx((1 + 1 - 1) / 3)
     assert r["real_roi"] == pytest.approx((0.91 + 0.91 - 1) / 3)
@@ -64,6 +64,6 @@ def test_clv_sign():
     w = pd.DataFrame({"game_id": [1, 2], "line_early": [220.0, 220.0], "line_afternoon": [222.0, 222.0],
                       "p_over_early": 0.5, "p_under_early": 0.5, "over_price_early": 1.91, "under_price_early": 1.91,
                       "p_over_afternoon": 0.5, "p_under_afternoon": 0.5})
-    d = backtest._bets(pred, w, "early", "proj")
+    d = backtest._bets(pred, w, "early", "proj", backtest.TEMPORAL)
     assert d["clv_pts"].tolist() == [2.0, -2.0]  # over gained 2 points, under lost 2
     assert d["clv_cents"].iloc[0] > 0 > d["clv_cents"].iloc[1]
