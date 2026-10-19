@@ -71,17 +71,24 @@ One row per game, bookmaker, market and anchor.
 | home_price, away_price | Spreads and h2h only, decimal odds |
 | source | Which ingester wrote the row |
 
-Prices are stored as decimal odds converted exactly from American odds
-(`+150` becomes 2.5, `-110` becomes 1.9091). Only totals feed the model; spreads
+Prices are stored as decimal odds, as The Odds API sends them. The legacy
+adapter uses the legacy table's decimal columns, which match the raw payloads
+exactly; its American columns were rounded from those decimals (1.91 became
+−109), so they are only a fallback where a decimal is missing. Only totals feed the model; spreads
 and h2h are kept so nothing has to be refetched later.
 
 **Anchors.** The live ingester (The Odds API) takes `open` (first snapshot seen),
 `pretip` (a configurable lead before tip, default 60 minutes) and `close` (the
-last snapshot before tip). The legacy DB used the labels `open` (nominally 18 h
-before tip), `noon_local` (nominally 12 h) and `close` (nominally 0.5 h); the
-adapter maps `noon_local` to `pretip` and keeps the nominal hours in
-`nominal_hours_before`. The legacy rows carry no capture timestamps, so the
-anchor times are labels, not verified times. Phase 3 says what was done about that.
+last snapshot before tip), each with its real `captured_utc`.
+
+The legacy labels are wrong. Measured from the raw payloads, the legacy
+`open` is mostly in-play, `noon_local` is about 17 h before tip and `close` about
+6 h before tip. The backtest therefore does not use the legacy table's anchors:
+it rebuilds early (~23h), overnight (~17h) and afternoon (~6h) anchors from the
+raw payloads by measured capture time
+(`nbatotals/evaluate/adapters/legacy_lake.py`; see docs/RESULTS.md, "Data
+defect"). When `NBA_LEGACY_ODDS_LAKE` is set, the legacy adapter also stamps
+each legacy row with its real capture time and drops in-play rows.
 
 ## injuries
 

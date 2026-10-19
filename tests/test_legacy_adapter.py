@@ -100,3 +100,20 @@ def test_real_legacy_db_invariants():
     assert report["pace_check"]["rows_possessions_off_by_more_than_0.01"] == 0
     cov = report["close_coverage"]
     assert (cov.loc[[2022, 2023, 2024], "share"] == 1.0).all()
+
+
+def test_anchor_quotes_rebuilt_from_lake(tmp_path, monkeypatch):
+    path = legacy_layout.build(tmp_path / "legacy.db")
+    lake_dir = legacy_layout.build_lake(tmp_path / "lake")
+    monkeypatch.setenv(legacy.ENV_VAR, str(path))
+    monkeypatch.delenv(legacy_lake.ENV_VAR, raising=False)
+    games = legacy.load()["games"]
+    quotes, counts = legacy_lake.anchor_quotes(legacy_lake.read_lake(lake_dir), games)
+    got = set(zip(quotes["game_id"], quotes["anchor"]))
+    # game 101's 01:25-style file was captured after tip: no early anchor for it
+    assert (101, "early") not in got
+    assert {(101, "overnight"), (101, "afternoon"), (102, "early"), (102, "overnight"), (102, "afternoon")} <= got
+    assert counts["rows_in_play"] == 3  # the three books in 101's in-play file
+    assert (quotes["lead_hours"] > 0).all()
+    aft = quotes[(quotes["game_id"] == 102) & (quotes["anchor"] == "afternoon")]["lead_hours"].iloc[0]
+    assert aft == pytest.approx(7 + 5 / 60)
