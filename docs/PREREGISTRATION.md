@@ -172,3 +172,39 @@ unchanged. Only the market anchors change:
    test needs live collection from 2025-26 on.
 5. Stop rule: if early's consensus MAE against the actual total is below
    afternoon's, grading stops and the problem is reported.
+
+## Amendment 2 (20 October 2026, before any betting metric on this source)
+
+Reason: the orchestrating review session found a second set of raw The Odds
+API payloads in the legacy folder (`multi_region_oct2024`), polled at seven
+fixed offsets before each game's tip, including a true close 15 minutes out,
+with 31 to 34 books at the close and Pinnacle on about 98% of games. That
+replaces the temporal files of Amendment 1, which have no close. The Phase 3
+grid search reads no odds, so its results stand. The expectations, evidence
+bar, consensus rule, grading rules and thresholds are unchanged.
+
+1. Anchors are the source's seven buckets: opening (~18–36 h before tip), noon
+   (~10 h), afternoon (~5 h), early_evening (~3 h), late_evening (~2 h),
+   near_close (~1 h) and **true close (T−15 min)**. A file counts only if its
+   `metadata.timestamp` is before `event.commence_time`. A book is dropped if its
+   `last_update` is after `commence_time` or its over and under points differ.
+   Prices are converted from American to decimal exactly.
+2. Games are joined by `commence_time` converted to a US Eastern date plus home
+   and away team names mapped to aliases (the source's `db_game_id` is not a
+   BallDontLie id).
+3. **The primary comparison is the consensus at true close (T−15 min)**, built by
+   the pre-registered consensus rule.
+4. CLV is measured from each earlier bucket's consensus to true close, in points
+   and cents. Opening and noon are the headline CLV rows; the pre-registered
+   "pretip" CLV criterion is evaluated at noon.
+5. Secondary, labelled: a Pinnacle-only comparison (cover and fair ROI against
+   Pinnacle's own true-close line and devigged price) for games where Pinnacle
+   quotes a total.
+6. Stop rule: before grading, the sanity table must show mean devigged p_over
+   near 0.50 at every bucket, and MAE vs the actual total must not be lower at
+   any earlier bucket than at true close on the same games. If it is, that is
+   contamination: grading stops and it is reported.
+7. 2021-22 is incomplete in this source (about 1,144 of 1,323 games). It is a
+   training season only, so this affects no test season.
+8. The Amendment 1 run (afternoon ~6h from the temporal files) is kept as a
+   cross-check appendix, not the headline.
