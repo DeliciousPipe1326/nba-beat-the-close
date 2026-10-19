@@ -15,8 +15,7 @@ import pandas as pd
 
 from dataclasses import dataclass, field
 
-from nbatotals.evaluate import fit, market, metrics
-from nbatotals.model.projection import project
+from nbatotals.evaluate import market, metrics
 
 
 @dataclass(frozen=True)
@@ -43,6 +42,14 @@ TRUE_CLOSE = MarketSpec(
             "early_evening": "early evening (~3h)", "late_evening": "late evening (~2h)",
             "near_close": "near close (~1h)", "true_close": "true close (T−15 min)"},
 )
+# Odds you collect yourself with `poll-odds` (live anchor names; T-15 min is the
+# reference, matching the true close graded above).
+LIVE = MarketSpec(
+    anchors=("opening", "t-10h", "t-5h", "t-3h", "t-2h", "t-1h", "t-15m"), ref="t-15m",
+    clv_from=("opening", "t-10h", "t-5h", "t-3h", "t-2h", "t-1h"), pretip="t-10h", headline_clv=("opening", "t-10h"),
+    labels={"opening": "opening", "t-10h": "T−10h", "t-5h": "T−5h", "t-3h": "T−3h", "t-2h": "T−2h", "t-1h": "T−1h",
+            "t-15m": "T−15 min"},
+)
 # Pre-registration Amendment 1: temporal payloads, no close (cross-check only).
 TEMPORAL = MarketSpec(
     anchors=("early", "overnight", "afternoon"), ref="afternoon", clv_from=("early", "overnight"),
@@ -54,7 +61,6 @@ TEMPORAL = MarketSpec(
 TEST_SEASONS = (2022, 2023, 2024)
 THRESHOLDS = (0, 1, 2, 3, 4, 6)
 BREAKEVEN_110 = 110 / 210
-DEFAULT_POINT = dict(l3=0.3, l10=0.5, season=0.2, shrinkage=5, pace_weight=1.0, home_court_total=0, b2b_total_per_team=0)
 
 
 def season_label(s) -> str:
@@ -63,53 +69,59 @@ def season_label(s) -> str:
 
 # --------------------------------------------------------------------------- predictions
 
-def predictions(games, box, base, test_seasons=TEST_SEASONS, progress=None, log_path=None):
+def predictions(games, box, base, test_seasons=TEST_SEASONS, progress=None, log_path=None, projector=None):
+    """Walk-forward: for each test season, fit on earlier seasons only, then project that season.
+
+    `projector` is any object implementing nbatotals/model/base.py (default: the
+    pre-registered pace_eff formula). Returns (pred, fits, log_rows).
+    """
+    from nbatotals.features.pointintime import build_features
+    from nbatotals.model import base as model_base
+    from nbatotals.model import registry
+
+    projector = projector or registry.get()
     games = games[games["season"] <= max(test_seasons)]
-    log, chosen, feats = fit.search(games, box, base, test_seasons, progress=progress)
-    if log_path:
+    targets = games[(games["status"] == "final") & (games["postseason"] == 0)].reset_index(drop=True)
+    actual = targets.set_index("id")[["home_pts", "away_pts"]].sum(axis=1)
+    # games played before each target (for the "both teams 10+ games" cut), independent of the model
+    played = build_features(targets, games, box, base).set_index("game_id")[["home_n", "away_n"]]
+    default_proj = model_base.check_output(projector.predict(targets, games, box, None, base), targets)
+    default_proj = default_proj.set_index("game_id")["total_proj"]
+    rows, fit_rows, logs = [], [], []
+    for s in test_seasons:
+        train_games = games[games["season"] < s]
+        train_box = box[box["game_id"].isin(train_games["id"])]
+        state = projector.fit(train_games, train_box, base, progress=progress) or {}
+        tg = targets[targets["season"] == s]
+        proj = model_base.check_output(projector.predict(tg, games, box, state, base), tg)
+        proj = proj.set_index("game_id")["total_proj"]
+        ids = tg["id"].to_numpy()
+        df = pd.DataFrame({
+            "game_id": ids, "season": s,
+            "proj": proj.loc[ids].to_numpy(),
+            "proj_default": default_proj.loc[ids].to_numpy(),
+            "actual": actual.loc[ids].to_numpy(),
+            "both_10": ((played.loc[ids, "home_n"] >= 10) & (played.loc[ids, "away_n"] >= 10)).to_numpy(),
+        })
+        rows.append(df)
+        if state.get("log") is not None:
+            logs.append(state["log"])
+        fit_rows.append({
+            "test_season": s, "trained_on": ", ".join(season_label(x) for x in range(min(games["season"]), s)),
+            **state.get("summary", {}),
+            "test_rmse_chosen": float(np.sqrt(((df["proj"] - df["actual"]) ** 2).mean())),
+            "test_rmse_default": float(np.sqrt(((df["proj_default"] - df["actual"]) ** 2).mean())),
+            "test_n": len(df),
+        })
+    log = (projector.combine_logs(logs) if hasattr(projector, "combine_logs") else pd.concat(logs, ignore_index=True)
+           ) if logs else pd.DataFrame()
+    if log_path and len(log):
         Path(log_path).parent.mkdir(parents=True, exist_ok=True)
         # mtime=0 keeps the file byte-identical across re-runs, so git diff shows real changes only
         text = log.to_csv(sep="\t", index=False, float_format="%.6f")
         with open(log_path, "wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", mtime=0) as fh:
             fh.write(text.encode())
-
-    targets = games[(games["status"] == "final") & (games["postseason"] == 0)].reset_index(drop=True)
-    actual = targets.set_index("id")[["home_pts", "away_pts"]].sum(axis=1)
-    default_f = feats[((0.3, 0.5, 0.2), base["features"]["team_shrinkage_games"])]
-    default_proj = project(default_f, base).set_index("game_id")["total_proj"]
-    rows = []
-    fit_rows = []
-    for s in test_seasons:
-        row = chosen[s]
-        prm = fit.params_for(base, row)
-        blend = (float(row["l3"]), float(row["l10"]), float(row["season"]))
-        f = feats[(blend, int(row["shrinkage"]))]
-        f = f[f["season"] == s]
-        proj = project(f, prm).set_index("game_id")["total_proj"]
-        df = pd.DataFrame({
-            "game_id": f["game_id"].to_numpy(), "season": s,
-            "proj": proj.loc[f["game_id"]].to_numpy(),
-            "proj_default": default_proj.loc[f["game_id"]].to_numpy(),
-            "actual": actual.loc[f["game_id"]].to_numpy(),
-            "both_10": ((f["home_n"] >= 10) & (f["away_n"] >= 10)).to_numpy(),
-        })
-        rows.append(df)
-        grp = log[log["test_season"] == s]
-        dmask = np.ones(len(grp), dtype=bool)
-        for k, v in DEFAULT_POINT.items():
-            dmask &= np.isclose(grp[k].to_numpy(dtype=float), v)
-        fit_rows.append({
-            "test_season": s, "trained_on": ", ".join(season_label(x) for x in range(min(games["season"]), s)),
-            "train_n": int(row["train_n"]),
-            "l3": row["l3"], "l10": row["l10"], "season_w": row["season"], "shrinkage": int(row["shrinkage"]),
-            "pace_weight": row["pace_weight"], "home_court_total": row["home_court_total"],
-            "b2b_total_per_team": row["b2b_total_per_team"],
-            "train_rmse_chosen": row["train_rmse"], "train_rmse_default": float(grp.loc[dmask, "train_rmse"].iloc[0]),
-            "test_rmse_chosen": float(np.sqrt(((df["proj"] - df["actual"]) ** 2).mean())),
-            "test_rmse_default": float(np.sqrt(((df["proj_default"] - df["actual"]) ** 2).mean())),
-            "test_n": len(df),
-        })
-    return pd.concat(rows, ignore_index=True), pd.DataFrame(fit_rows), log
+    return pd.concat(rows, ignore_index=True), pd.DataFrame(fit_rows), len(log)
 
 
 # --------------------------------------------------------------------------- grading
@@ -267,14 +279,14 @@ def pinnacle_grading(pred: pd.DataFrame, odds: pd.DataFrame, base: dict, spec: M
     return pd.DataFrame(rows)
 
 
-def run(games, box, odds, base, spec: MarketSpec = TRUE_CLOSE, progress=None, log_path=None, fitted=None) -> dict:
+def run(games, box, odds, base, spec: MarketSpec = TRUE_CLOSE, progress=None, log_path=None, fitted=None,
+        projector=None) -> dict:
     """`fitted` = (pred, fits, log_rows) from an earlier `predictions` call, to skip the odds-free grid."""
     cons = market.consensus(odds, base)
     cons, order_dropped = market.enforce_anchor_order(cons, spec.ref)
     w = market.wide(cons)
     if fitted is None:
-        pred, fits, log = predictions(games, box, base, progress=progress, log_path=log_path)
-        fitted = (pred, fits, len(log))
+        fitted = predictions(games, box, base, progress=progress, log_path=log_path, projector=projector)
     pred, fits, log_rows = fitted
     g = grading(pred, w, spec)
     sanity = market.sanity_table(cons, games[games["season"] <= max(TEST_SEASONS)], spec.labels)
@@ -375,13 +387,18 @@ def grading_table(res: dict, run="tuned", cut="all") -> str:
 
 def fit_table(res: dict) -> str:
     f = res["fits"]
-    rows = [[season_label(r.test_season), r.trained_on, f"{r.train_n:,}",
-             f"{r.l3:.1f}/{r.l10:.1f}/{r.season_w:.1f}", r.shrinkage, r.pace_weight, f"{r.home_court_total:+.0f}",
-             f"{r.b2b_total_per_team:+.0f}", f"{r.train_rmse_chosen:.3f}", f"{r.train_rmse_default:.3f}",
-             f"{r.test_rmse_chosen:.3f}", f"{r.test_rmse_default:.3f}"] for r in f.itertuples()]
-    return _table(["test season", "trained on", "train n", "blend l3/l10/season", "shrinkage", "pace weight",
-                   "home court", "B2B per team", "train RMSE chosen", "train RMSE default", "test RMSE chosen",
-                   "test RMSE default"], rows)
+    if "l3" in f:  # the pace_eff formula's table, as pre-registered
+        rows = [[season_label(r.test_season), r.trained_on, f"{r.train_n:,}",
+                 f"{r.l3:.1f}/{r.l10:.1f}/{r.season_w:.1f}", r.shrinkage, r.pace_weight, f"{r.home_court_total:+.0f}",
+                 f"{r.b2b_total_per_team:+.0f}", f"{r.train_rmse_chosen:.3f}", f"{r.train_rmse_default:.3f}",
+                 f"{r.test_rmse_chosen:.3f}", f"{r.test_rmse_default:.3f}"] for r in f.itertuples()]
+        return _table(["test season", "trained on", "train n", "blend l3/l10/season", "shrinkage", "pace weight",
+                       "home court", "B2B per team", "train RMSE chosen", "train RMSE default", "test RMSE chosen",
+                       "test RMSE default"], rows)
+    cols = [c for c in f.columns if c not in ("test_season",)]
+    fmt = lambda v: f"{v:,}" if isinstance(v, (int, np.integer)) else f"{v:.3f}" if isinstance(v, float) else str(v)
+    rows = [[season_label(r["test_season"])] + [fmt(r[c]) for c in cols] for _, r in f.iterrows()]
+    return _table(["test season"] + [c.replace("_", " ") for c in cols], rows)
 
 
 def accuracy_table(res: dict) -> str:

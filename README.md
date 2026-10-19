@@ -40,8 +40,8 @@ prices. Testing whether an opening-line strategy works needs a live, unseen
 season (2025-26 onwards, collected with the ingesters here) and its own
 pre-registration.
 
-**How many bets it takes to prove an edge.** Totals are noisy (the closing
-line misses the final total by 18 points SD). To show, at 95% confidence, that a
+**How many bets it takes to prove an edge.** Totals are noisy: the true close
+misses the final total by 17.8 points RMSE in this data. To show, at 95% confidence, that a
 true win rate clears the 52.38% break-even you need roughly
 `n = 1.96² · p(1−p) / (p − 0.5238)²` bets:
 
@@ -53,8 +53,16 @@ true win rate clears the 52.38% break-even you need roughly
 | 57.38% | 5 points | 376 | a third of one |
 
 Three seasons give about 3,650 bets. That can find a large edge or rule one
-out; it cannot confirm a small one. An earlier variance study by the same
-author reached the same figures (about 9,000 bets for a 1-point edge).
+out; it cannot confirm a small one.
+
+## Background
+
+The author previously tried many approaches privately: team rating systems,
+boosted models on box-score features, player-level projections, rules built on
+line movement, and player props. None of them survived an audit for leakage,
+pricing and selection. This repository keeps only the one engine that was
+rebuilt under pre-registered rules, together with the data engine and harness
+needed to test anything else the same way.
 
 ## What it is
 
@@ -75,6 +83,25 @@ No machine learning: a formula whose every coefficient is in
 the backtest. Details and the leakage self-test:
 [docs/features.md](docs/features.md).
 
+**Example projectors** (in [nbatotals/model/](nbatotals/model/), added after the
+pre-registered run and not part of it). They went through the same harness and
+the same leakage test; full results are in
+[RESULTS.md, "Other projectors"](docs/RESULTS.md#other-projectors-through-the-same-harness).
+
+- `league_avg`: every game is projected at the point-in-time league-average
+  total (league pace × league points per 100 for both teams). It has no team
+  information and no settings of its own. Measured: 49.7% cover against the
+  true close (95% Wilson 48.1–51.3%), −5.1% at real prices, CLV from the
+  opening −0.02 points.
+- `elo_total`: each team has a rating in points of total. The expected total is
+  the point-in-time league-average total plus both teams' ratings; after each
+  game both ratings move by K × (actual − expected), and ratings are multiplied
+  by `season_carry` at each new season. Settings are under `models.elo_total` in
+  params.yaml; `fit` picks K from the declared `k_grid` on earlier seasons (it
+  chose 0.05 every season). Measured: 49.2% cover (47.6–50.9%), −6.1% at real
+  prices, CLV +0.59 points from the opening and +0.14 from noon, test RMSE 18.2
+  to 18.7.
+
 **Tier B** (optional, not built): player-level EPM from Dunks & Threes behind
 your own key. `nbatotals/ingest/dunksandthrees.py` is a documented stub. Nothing
 in the results says anything about it.
@@ -84,6 +111,51 @@ every bet graded at its own price, CLV in points and cents, Wilson and bootstrap
 intervals, edge thresholds fixed in advance and all reported, and a
 market-plus-model regression. Any number that looks like an edge is treated as
 a bug until checks rule that out (see RESULTS.md for the eight it went through).
+
+## Building on this
+
+The harness grades any projection the same way, so you can test your own model
+without touching it. A projector is a class with a `name`, a `fit` and a
+`predict` (the interface is in [nbatotals/model/base.py](nbatotals/model/base.py)):
+
+```python
+import pandas as pd
+from nbatotals.features.pointintime import build_features
+
+
+class TeamPaceOnly:
+    """Team pace, league-average efficiency."""
+    name = "team_pace_only"
+
+    def fit(self, train_games, train_box, params, progress=None):
+        return {}  # called once per test season with earlier seasons only; tune here if you like
+
+    def predict(self, targets, games, box, state, params):
+        f = build_features(targets, games, box, params)  # point-in-time: rows dated before each game
+        pace = f.league_pace + (f.home_pace - f.league_pace) + (f.away_pace - f.league_pace)
+        return pd.DataFrame({"game_id": f.game_id, "total_proj": pace * 2 * f.league_ortg / 100})
+```
+
+1. **Register it:** add `TeamPaceOnly.name: TeamPaceOnly` to `PROJECTORS` in
+   [nbatotals/model/registry.py](nbatotals/model/registry.py).
+2. **Leakage test:** run `pytest tests/test_leakage.py`. It runs the truncation
+   test on every registered projector: each game's projection must be identical
+   when every row dated on or after that game is deleted.
+3. **The rule:** `fit()` sees only seasons before the one being tested and never
+   odds; `predict()` may use only rows dated before each game. `state=None` means
+   untuned (the values in params.yaml).
+4. **Backtest it:** `python -m nbatotals backtest --legacy --model team_pace_only`
+   writes `docs/backtest_legacy_report_team_pace_only.md` in exactly the
+   format of the pre-registered report. `python -m nbatotals backtest --legacy`
+   (the default model, `pace_eff`) regenerates
+   [docs/backtest_legacy_report.md](docs/backtest_legacy_report.md) byte for
+   byte. `--legacy` needs the maintainer's private data. With odds you have
+   collected yourself, call
+   `nbatotals.evaluate.backtest.run(games, box, odds, params, spec=backtest.LIVE, projector=...)`.
+5. **Use it live:** `python -m nbatotals today --model team_pace_only`.
+
+The two example projectors described under "What it is" (`league_avg`,
+`elo_total`) are written exactly this way; read their source as templates.
 
 ## Quick start
 
@@ -157,6 +229,11 @@ Fixed means it never did.
 | `ingest.theodds.min_requests_remaining` | 20 | Refuse to spend credits below this remaining quota. |
 | `ingest.balldontlie.min_seconds_between_requests` | 12 | Spacing to respect your plan's rate limit. |
 | `today.market_anchor` | close | Which stored anchor supplies the line in the `today` CSV (`close` = latest pre-tip poll). |
+| `models.elo_total.k` | 0.05 | `elo_total` only: rating points moved per point of total error, when untuned (`today`, `state=None`). |
+| `models.elo_total.k_grid` | 0.01, 0.02, 0.05, 0.1 | `elo_total` only: the declared grid `fit` searches on earlier seasons by RMSE. |
+| `models.elo_total.season_carry` | 0.5 | `elo_total` only: ratings are multiplied by this at each new season. |
+| `models.elo_total.league_prior_games` | 100 | `elo_total` only: weight, in games, of the base league total early in a season. |
+| `models.elo_total.fallback_total` | 222.0 | `elo_total` only: base league total when no earlier season is in the store. |
 
 If you change a fitted or fixed value and want to know whether it helps, re-run
 a backtest on data you collect yourself, pre-register what you expect first,
@@ -181,8 +258,9 @@ and report every variant you tried, not just the best one.
   no team-turnover line, so live possessions can sit slightly below those from
   the official team totals the backtest used. The size of that difference has
   not been measured.
-- **The seasons were not unseen.** The same author tested related ideas on these
-  seasons before. A clean confirmation needs data collected from now on.
+- **The seasons were not unseen.** The author had tested other approaches on these
+  seasons before (see Background). A clean confirmation needs data collected
+  from now on.
 
 ## Lessons for anyone using The Odds API historical data
 
@@ -200,7 +278,7 @@ every anchor from the raw payloads' own timestamps rather than trusting labels.
 | Path | What |
 |---|---|
 | `nbatotals/features/pointintime.py` | Point-in-time team features (cut-off: rows dated before the game) |
-| `nbatotals/model/projection.py` | The projection formula |
+| `nbatotals/model/` | Projector interface (`base.py`), registry, the pre-registered formula (`projection.py`, `pace_eff.py`) and the two examples |
 | `nbatotals/evaluate/` | Consensus and devig, walk-forward fit, grading, leakage checks, legacy adapters |
 | `nbatotals/ingest/` | BallDontLie, The Odds API, Dunks & Threes stub |
 | `nbatotals/today.py`, `nbatotals/cli.py` | The `today` CSV and the command line |

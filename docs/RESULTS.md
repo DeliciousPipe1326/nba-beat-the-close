@@ -390,3 +390,53 @@ row is in-play.
 open-to-close movement there read in-play prices and is void. That includes the
 FADE@Noon 65%, the Stage 3 conditioning, RMTS reverse-movement, and the
 rolling-reset Elo note that "market_open" beat the close.
+
+---
+
+## Other projectors through the same harness
+
+**Added on 20 October 2026, after the pre-registered run. These are not part of
+the pre-registered test** and nothing was pre-registered for them. They are
+worked examples of the projector interface (README, "Building on this"). Each
+went through the identical walk-forward harness, market source (true close,
+T−15 min) and grading rules, and each passes the same truncation leakage test.
+Full reports: [league_avg](backtest_legacy_report_league_avg.md),
+[elo_total](backtest_legacy_report_elo_total.md).
+
+- `league_avg`: every game at the point-in-time league-average total; no team
+  information at all.
+- `elo_total`: Elo-style team ratings on totals. Each team has a rating in points;
+  the expected total is the league average plus both ratings, and both teams move
+  by K × (actual − expected) after each game, with ratings halved at each new
+  season. K was chosen from a declared grid {0.01, 0.02, 0.05, 0.1} by RMSE on
+  earlier seasons; it picked 0.05 every season. The brief asked for an Elo "on
+  margin", but a margin rating carries no information about totals, so the Elo
+  update was applied to the total's residual instead.
+
+Tuned model, every game, pooled over 2022-23 to 2024-25 (n = 3,652 graded at the
+true close):
+
+| projector | cover (95% Wilson) | fair ROI (95% CI) | real ROI (95% CI) | Pinnacle-only cover | blend weight `c` on model (95% CI) | MAE vs actual (close: 14.16) | CLV opening → close, points (95% CI) | CLV noon → close (95% CI) |
+|---|---|---|---|---|---|---|---|---|
+| pace_eff (pre-registered) | 48.9% (47.3%–50.5%) | -2.4% (-5.7% to 0.8%) | -6.7% (-9.8% to -3.7%) | 49.5% | −0.117 (−0.264, +0.031) | 14.70 | +0.39 (+0.29 to +0.49) | -0.02 (-0.08 to +0.05) |
+| league_avg | 49.7% (48.1%–51.3%) | -0.6% (-3.8% to 2.7%) | -5.1% (-8.2% to -2.0%) | 49.7% | −0.391 (−0.685, −0.098) | 15.87 | -0.02 (-0.12 to +0.08) | -0.07 (-0.13 to -0.00) |
+| elo_total | 49.2% (47.6%–50.9%) | -1.7% (-4.9% to 1.6%) | -6.1% (-9.1% to -2.9%) | 49.6% | −0.071 (−0.210, +0.068) | 14.63 | +0.59 (+0.50 to +0.69) | +0.14 (+0.08 to +0.21) |
+
+Per season, cover at the true close: league_avg 50.5%, 50.0%, 48.6%; elo_total
+48.5%, 49.8%, 49.4%. Neither has a cover lower bound above 52.38% in any of its
+504 cells; the highest are 50.0% and 48.8%.
+
+What this shows, descriptively:
+
+- **Knowing nothing does as well against the close as either model.**
+  league_avg's cover is within noise of 50%, and of pace_eff's. Its CLV is zero,
+  as a no-information placebo's should be. Its blend weight is negative (−0.39)
+  because a constant prediction only adds noise once the close is known.
+- **elo_total is slightly more accurate than pace_eff overall** (MAE 14.63 vs
+  14.70; test RMSE lower in two of three seasons: 18.69, 18.23 and 18.29 vs 18.78,
+  18.40 and 18.28) and shows more line
+  movement towards it: +0.59 points from the opening and +0.14 from noon.
+  Neither turns into covers (49.2%) or profit (−6.1% at real prices). Like
+  pace_eff's opening CLV, this is an exploratory, unregistered observation. It
+  went through none of the bug-first checks in the section above, and it would
+  need a pre-registered test on an unseen season before it means anything.

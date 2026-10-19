@@ -16,13 +16,15 @@ does not.
 ## What we already know (so this is not a pristine hold-out)
 
 The same maintainer spent 2025-26 testing related ideas on these same four
-seasons in an older private repository. That work found closing totals well
-calibrated (mean error +0.37 points, SD 18.0 points across 2021-22 to 2024-25),
-found the market prices pace-driven totals variance in every cell of a
-pace-variance kill-test, and found no out-of-sample edge in any totals strategy.
-So these seasons are not unseen, and a positive result here would still need
-confirming on a season nobody has looked at: 2025-26 onward, collected live with
-`nbatotals.ingest`.
+seasons in an older private repository, and found no out-of-sample edge in any
+totals strategy there. So these seasons are not unseen, and a positive result
+here would still need confirming on a season nobody has looked at: 2025-26
+onward, collected live with `nbatotals.ingest`.
+
+*[Edited 20 October 2026, after the results, at the author's request: figures
+from the earlier private work, whose code is not in this repository, were
+removed from this section and from "For scale" below. The original wording is
+in commit c273693. No rule, expectation or threshold changed.]*
 
 ## Hypotheses
 
@@ -59,9 +61,9 @@ cell clears the bar while the primary does not, it is reported as an exploratory
 finding that needs a fresh season, not as an edge: there are 6 thresholds × 3
 anchors × 3 seasons of cells, and some will look good by chance.
 
-For scale: with a total SD of 18 points, the earlier variance study put the
-sample needed to show a 1-point-of-win-rate edge (53.4% vs 52.4%) at about 9,000
-bets at 95% confidence; three seasons give about 3,700. **This test can detect
+For scale: by the normal approximation `n = 1.96² · p(1−p) / (p − 0.5238)²`,
+showing a 1-point-of-win-rate edge (53.4% vs 52.4%) at 95% confidence takes
+about 9,500 bets; three seasons give about 3,700. **This test can detect
 a large edge or rule one out; it cannot confirm a small one.**
 
 ## Data

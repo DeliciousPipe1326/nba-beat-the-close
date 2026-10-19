@@ -7,7 +7,7 @@ from statistics import NormalDist
 import numpy as np
 
 Z95 = 1.959963984540054
-TOTAL_SD = 18.0  # SD of total error vs the close, from the earlier variance study; used only for CLV in cents
+TOTAL_SD = 18.0  # pre-registered SD of total error around the close (measured here: RMSE 17.8); only for CLV in cents
 SEED = 20261020
 N_BOOT = 10_000
 _N = NormalDist()

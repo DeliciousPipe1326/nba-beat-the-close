@@ -15,23 +15,34 @@ import pandas as pd
 from nbatotals import data
 from nbatotals.evaluate import market
 from nbatotals.features.pointintime import build_features
+from nbatotals.model import base as model_base
+from nbatotals.model import registry
 from nbatotals.model.projection import project
 
 HEADER = ("# Research output, not betting advice. In a pre-registered walk-forward backtest (docs/RESULTS.md) "
           "this model covered 48.9% against the true closing total and lost 6.7% at real prices: no edge.")
 
-COLUMNS = ["game_date", "tip_utc", "away", "home", "projected_total", "projected_pace", "home_pts_proj",
+COLUMNS = ["game_date", "tip_utc", "away", "home", "model", "projected_total", "projected_pace", "home_pts_proj",
            "away_pts_proj", "market_line", "market_anchor", "market_captured_utc", "market_lead_minutes",
            "books", "p_over_devig", "edge", "games_played_home", "games_played_away"]
 
 
-def build(con: sqlite3.Connection, date: str, params: dict) -> pd.DataFrame:
+def build(con: sqlite3.Connection, date: str, params: dict, model: str | None = None) -> pd.DataFrame:
+    """`model` is a registered projector, used untuned (state=None: the values in params.yaml).
+
+    projected_pace and the per-team points are filled for pace_eff only.
+    """
     games, box = data.load_frames(con)
     targets = games[games["game_date"] == date]
     if targets.empty:
         return pd.DataFrame(columns=COLUMNS)
+    projector = registry.get(model or registry.DEFAULT)
     feats = build_features(targets, games, box, params)
-    proj = project(feats, params)
+    total = model_base.check_output(projector.predict(targets, games, box, None, params), targets)
+    if projector.name == "pace_eff":
+        proj = project(feats, params)
+    else:
+        proj = total.assign(pace_proj=None, home_pts_proj=None, away_pts_proj=None)
     out = targets[["id", "game_date", "tip_utc", "away", "home"]].merge(
         proj, left_on="id", right_on="game_id").merge(
         feats[["game_id", "home_n", "away_n"]], on="game_id")
@@ -51,6 +62,7 @@ def build(con: sqlite3.Connection, date: str, params: dict) -> pd.DataFrame:
                               "captured_utc": "market_captured_utc", "p_over": "p_over_devig",
                               "home_n": "games_played_home", "away_n": "games_played_away"})
     out["market_anchor"] = anchor
+    out["model"] = projector.name
     out["edge"] = out["projected_total"] - pd.to_numeric(out["market_line"])
     for c in ("projected_total", "projected_pace", "home_pts_proj", "away_pts_proj", "edge"):
         out[c] = pd.to_numeric(out[c]).round(1)

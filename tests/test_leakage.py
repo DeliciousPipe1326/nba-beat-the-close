@@ -2,10 +2,12 @@
 
 import os
 
+import pandas as pd
 import pytest
 
 from nbatotals import params as P
 from nbatotals.evaluate import leakage
+from nbatotals.model import registry
 from tests.fixtures import synthetic
 
 # The literal rule "same-game correlation must not exceed the previous-game
@@ -47,6 +49,30 @@ def test_truncation_holds_for_every_knob(league, prm, overrides):
     sample = leakage.stratified_sample(games, per_cell=8, seed=3)
     res = leakage.truncation_check(games, box, P.with_overrides(prm, overrides), sample)
     assert res["mismatches"] == []
+
+
+@pytest.mark.parametrize("name", sorted(registry.PROJECTORS))
+def test_every_registered_projector_passes_truncation(league, prm, name):
+    games, box = league
+    sample = leakage.stratified_sample(games, per_cell=35)
+    assert len(sample) >= 200
+    res = leakage.projector_truncation_check(registry.get(name), games, box, prm, sample)
+    assert res["mismatches"] == []
+
+
+def test_truncation_check_catches_a_leaky_projector(league, prm):
+    games, box = league
+
+    class Peeks:  # uses each game's own final score: must be caught
+        name = "peeks"
+
+        def predict(self, targets, games, box, state, params):
+            g = games.set_index("id")
+            tot = [g.loc[i, "home_pts"] + g.loc[i, "away_pts"] if i in g.index else 0.0 for i in targets["id"]]
+            return pd.DataFrame({"game_id": targets["id"].to_numpy(), "total_proj": tot})
+
+    sample = leakage.stratified_sample(games, per_cell=3)
+    assert leakage.projector_truncation_check(Peeks(), games, box, prm, sample)["mismatches"]
 
 
 def test_correlation_check_passes_and_catches_a_leak(league, prm):

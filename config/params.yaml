@@ -120,3 +120,13 @@ today:
   # Which stored anchor supplies the market line in the `today` CSV. `close`
   # is the latest pre-tip poll, i.e. the freshest line you have.
   market_anchor: close
+
+models:
+  # Settings for the example projectors in nbatotals/model/ (not part of the
+  # pre-registered test; see docs/RESULTS.md, "Other projectors").
+  elo_total:
+    k: 0.05                 # untuned default: points of rating moved per point of total error
+    k_grid: [0.01, 0.02, 0.05, 0.1]   # declared grid; fit picks the lowest RMSE on earlier seasons
+    season_carry: 0.5       # ratings are multiplied by this at each new season
+    league_prior_games: 100 # games of weight on the base league total early in a season
+    fallback_total: 222.0   # base league total when no earlier season is available

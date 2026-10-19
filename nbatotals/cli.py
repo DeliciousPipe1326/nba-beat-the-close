@@ -48,6 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     t = with_db(sub.add_parser("today", help="write the research CSV for a date's fixtures"))
     t.add_argument("--date", default=None, help="YYYY-MM-DD, default today (US Eastern)")
     t.add_argument("--out", default=None, help="CSV path, default out/today_<date>.csv (git-ignored)")
+    t.add_argument("--model", default=None, help="registered projector (default pace_eff); see nbatotals/model/registry.py")
     sub.add_parser("verify-legacy", help="read $NBA_LEGACY_DB and print row-count checks")
     bt = sub.add_parser("backtest", help="walk-forward backtest (docs/RESULTS.md)")
     bt.add_argument("--legacy", action="store_true", required=True,
@@ -58,9 +59,10 @@ def build_parser() -> argparse.ArgumentParser:
                          "kept as a cross-check")
     bt.add_argument("--params", default=None, help="params.yaml to use (default config/params.yaml)")
     bt.add_argument("--out", default=None, help="where to write the full report (default under docs/)")
-    bt.add_argument("--log", default=str(ROOT / "docs" / "search" / "fit_log.tsv.gz"), help="grid-search log path")
+    bt.add_argument("--model", default=None, help="registered projector (default pace_eff); see nbatotals/model/registry.py")
+    bt.add_argument("--log", default=None, help="fit log path (default docs/search/fit_log[_<model>].tsv.gz)")
     bt.add_argument("--reuse-fit", action="store_true",
-                    help="reuse the odds-free walk-forward fit cached in data/fit_cache.pkl by an earlier run")
+                    help="reuse the odds-free walk-forward fit cached in data/ by an earlier run of the same model")
     return p
 
 
@@ -86,23 +88,28 @@ def cmd_backtest(args) -> int:
             os.environ[legacy_lake.ENV_VAR] = old
     games = frames["games"]
     box = frames["team_box"].drop(columns=["legacy_pace"])
+    from nbatotals.model import registry
+
+    projector = registry.get(args.model or registry.DEFAULT)
+    suffix = "" if projector.name == registry.DEFAULT else f"_{projector.name}"
     if args.market == "true-close":
         quotes, counts = legacy_multiregion.anchor_quotes(legacy_multiregion.read_files(), games)
         spec = backtest.TRUE_CLOSE
-        out_path = args.out or str(ROOT / "docs" / "backtest_legacy_report.md")
+        out_path = args.out or str(ROOT / "docs" / f"backtest_legacy_report{suffix}.md")
     else:
         quotes, counts = legacy_lake.anchor_quotes(legacy_lake.read_lake(), games)
         spec = backtest.TEMPORAL
-        out_path = args.out or str(ROOT / "docs" / "backtest_legacy_temporal_report.md")
+        out_path = args.out or str(ROOT / "docs" / f"backtest_legacy_temporal_report{suffix}.md")
+    log_path = args.log or str(ROOT / "docs" / "search" / f"fit_log{suffix}.tsv.gz")
     base = P.load(args.params)
-    cache = ROOT / "data" / "fit_cache.pkl"
+    cache = ROOT / "data" / f"fit_cache{suffix}.pkl"
     fitted = None
     if args.reuse_fit and cache.exists():
         fitted = pickle.loads(cache.read_bytes())
         print(f"reusing walk-forward fit from {cache}", file=sys.stderr)
-    res = backtest.run(games, box, quotes, base, spec=spec, fitted=fitted,
+    res = backtest.run(games, box, quotes, base, spec=spec, fitted=fitted, projector=projector,
                        progress=lambda i, n: print(f"\rgrid: blend point {i}/{n}", end="", file=sys.stderr),
-                       log_path=args.log)
+                       log_path=log_path)
     print(file=sys.stderr)
     cache.parent.mkdir(parents=True, exist_ok=True)
     cache.write_bytes(pickle.dumps(res["fitted"]))
@@ -152,7 +159,7 @@ def cmd_store(args) -> int:
             date = args.date or _today_eastern()
             out = Path(args.out or ROOT / "out" / f"today_{date}.csv")
             out.parent.mkdir(parents=True, exist_ok=True)
-            df = today.build(con, date, prm)
+            df = today.build(con, date, prm, model=args.model)
             today.write_csv(df, out)
             print(today.HEADER)
             print(df.to_string(index=False) if len(df) else f"no fixtures for {date} in the store; run ingest-games")
