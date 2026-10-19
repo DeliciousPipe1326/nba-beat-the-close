@@ -1,6 +1,81 @@
 # nbatotals parameters. Every number the engine uses lives here.
-# Model parameters (blend weights, priors, pace and efficiency coefficients,
-# home-court and rest adjustments) are added in Phase 2.
+#
+# "Fitted" means the walk-forward harness (Phase 3) re-chooses the value for
+# each test season using only earlier seasons, by minimising the RMSE of the
+# projected vs actual total (never betting results). The values below are the
+# untouched defaults: they are starting points, not estimates from data.
+# "Fixed" means the harness never changes it; change it yourself if your own
+# research says so, and re-run the backtest.
+
+features:
+  # Weights for blending a team's last 3 games, last 10 games and
+  # season-to-date. Must sum to 1. Windows only ever use games dated strictly
+  # before the game being projected, and only from the same season.
+  # Fitted.
+  blend:
+    l3: 0.3
+    l10: 0.5
+    season: 0.2
+
+  # Shrinkage count: the blended team stat is pulled towards the prior as if
+  # the prior were worth this many games. final = (n*blend + k*prior) / (n + k),
+  # where n is the team's games played this season before the game date.
+  # With n = 0 (opening night) the team is exactly the prior. Fitted.
+  team_shrinkage_games: 5
+
+  # Weight on a team's own previous-season rating in its early-season prior.
+  # 0 means every team starts the season at the league average and nothing
+  # from last season reaches a team's numbers. prior = w * last_season_team
+  # + (1 - w) * league. Fixed (not in the pre-registered fitted set).
+  team_carryover_weight: 0.0
+
+  # If true, a home team's stats use only its earlier home games and an away
+  # team's only its earlier away games. Fixed.
+  home_away_split: false
+
+league:
+  # The league averages (pace, points per 100 possessions) that team stats
+  # are measured against and shrunk towards. Each is the season-to-date
+  # league average from games dated strictly before the game, shrunk towards
+  # a base value as if the base were worth `shrinkage_team_games` team-games.
+  # Fixed.
+  shrinkage_team_games: 30
+
+  # Base value for the league average:
+  #   previous_season: the previous season's full league average (known before
+  #                    the season starts), falling back to the constants below
+  #                    when the store has no earlier season;
+  #   constant:        always the constants below.
+  # Fixed.
+  prior_source: previous_season
+
+  # Fallback constants. Rough values for the modern NBA, used only when no
+  # earlier season is available (in the legacy backtest: opening weeks of
+  # 2021-22, which is a training season, never a test season). Fixed.
+  fallback_pace: 99.0
+  fallback_ortg: 112.0
+
+projection:
+  # pace_proj = league_pace + pace_weight * ((home_pace - league_pace)
+  #                                          + (away_pace - league_pace))
+  # 1.0 is the usual additive rule (each team's pace deviation adds up);
+  # 0.5 averages the two deviations. Fitted.
+  pace_weight: 1.0
+
+  # off_home = league_ortg + off_weight * (home_ortg - league_ortg)
+  #                        + def_weight * (away_drtg - league_ortg)
+  # and the same for the away side. 1.0/1.0 is the additive matchup rule.
+  # Fixed: the pre-registration does not fit these.
+  off_weight: 1.0
+  def_weight: 1.0
+
+  # Points added to every projected total. Every game has a home team, so
+  # this also acts as the formula's constant term. 0 = no adjustment. Fitted.
+  home_court_total: 0.0
+
+  # Points added to the total for each team playing the second night of a
+  # back-to-back (0, 1 or 2 teams per game). 0 = no adjustment. Fitted.
+  b2b_total_per_team: 0.0
 
 market:
   # Pre-registered in docs/PREREGISTRATION.md; changing these after seeing
