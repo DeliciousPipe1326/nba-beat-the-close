@@ -24,6 +24,16 @@ BOX = [
 ]
 
 
+def _provider_decimal(american):
+    """The provider sends 2-dp decimal prices; legacy American columns were derived from them."""
+    if american is None:
+        return None
+    return round(1 + (american / 100 if american > 0 else 100 / -american), 2)
+
+
+GAME_DATES = {101: "2023-10-24", 102: "2023-10-25"}
+
+
 def _legacy_pace(rows, gid):
     """What the legacy 'pace' column holds: raw game possessions."""
     sides = [r for r in rows if r[0] == gid]
@@ -66,7 +76,10 @@ def build(path: str | Path) -> Path:
             snapshot_type TEXT, bookmaker TEXT, hours_before_game REAL, home_team_id INTEGER,
             total_line REAL, total_over_odds INTEGER, total_under_odds INTEGER,
             spread_home REAL, spread_home_odds INTEGER, spread_away_odds INTEGER,
-            ml_home_odds INTEGER, ml_away_odds INTEGER, snapshot_timestamp TIMESTAMP);
+            ml_home_odds INTEGER, ml_away_odds INTEGER, snapshot_timestamp TIMESTAMP,
+            raw_json_file TEXT, api_game_id TEXT,
+            total_over_decimal REAL, total_under_decimal REAL, spread_home_decimal REAL,
+            spread_away_decimal REAL, ml_home_decimal REAL, ml_away_decimal REAL);
         """
     )
     con.executemany("INSERT INTO games VALUES (?,?,?,?,?,?,?,?,?,?,NULL)", GAMES)
@@ -75,7 +88,53 @@ def build(path: str | Path) -> Path:
         "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         [(r[0], r[1], _legacy_pace(BOX, r[0]), *r[2:]) for r in BOX],
     )
-    con.executemany("INSERT INTO odds_truth VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)", _odds_rows())
+    con.executemany(
+        "INSERT INTO odds_truth VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,?,?,?,?,NULL,NULL,NULL,NULL)",
+        [r + (f"/x/date={GAME_DATES[int(r[1])]}/snapshot={r[3]}/odds.json", f"ev{r[1]}",
+              _provider_decimal(r[8]), _provider_decimal(r[9])) for r in _odds_rows()],
+    )
     con.commit()
     con.close()
     return path
+
+
+# Snapshot times per anchor for the synthetic lake. Game 101 tips 23:30Z on
+# 2023-10-24 (19:30 ET); its "open" file is captured after tip (in-play).
+SNAPSHOTS = {
+    (101, "open"): "2023-10-25T00:25:00Z",
+    (101, "noon_local"): "2023-10-24T06:25:00Z",
+    (101, "close"): "2023-10-24T18:55:00Z",
+    (102, "open"): "2023-10-24T00:25:00Z",
+    (102, "noon_local"): "2023-10-25T06:25:00Z",
+    (102, "close"): "2023-10-25T18:55:00Z",
+}
+COMMENCE = {101: "2023-10-24T23:30:00Z", 102: "2023-10-26T02:00:00Z"}
+NAMES = {101: ("Boston Celtics", "New York Knicks"), 102: ("Los Angeles Lakers", "Golden State Warriors")}
+
+
+def build_lake(root: str | Path) -> Path:
+    """Raw-payload files matching the odds rows above, in the provider's layout."""
+    import json
+
+    root = Path(root)
+    by_file = {}
+    for r in _odds_rows():
+        _, gid, market, anchor, book, _, _, total, o, u, *_ = r
+        if market != "totals":
+            continue
+        gid = int(gid)
+        key = (GAME_DATES[gid], anchor)
+        ev = by_file.setdefault(key, {}).setdefault(gid, {
+            "id": f"ev{gid}", "commence_time": COMMENCE[gid], "home_team": NAMES[gid][0],
+            "away_team": NAMES[gid][1], "bookmakers": [],
+        })
+        outcomes = [{"name": "Over", "price": _provider_decimal(o), "point": total},
+                    {"name": "Under", "price": _provider_decimal(u), "point": total}]
+        ev["bookmakers"].append({"key": book, "last_update": SNAPSHOTS[(gid, anchor)],
+                                 "markets": [{"key": "totals", "outcomes": outcomes}]})
+    for (date, anchor), events in by_file.items():
+        gid = next(iter(events))
+        d = root / f"date={date}" / f"snapshot={anchor}"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "odds.json").write_text(json.dumps({"timestamp": SNAPSHOTS[(gid, anchor)], "data": list(events.values())}))
+    return root

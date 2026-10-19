@@ -94,3 +94,68 @@ Conclusion: most legacy "open" snapshots were captured after tip-off (in-game
 lines), not ~18 h before. Any CLV or cover rate measured from the legacy open
 would be look-ahead. The close and noon anchors show no such signature, but
 neither has a verified capture time.
+
+## Anchor timing, measured (fixed before grading)
+
+The legacy `odds_truth` rows carry no capture time, but each names the raw The
+Odds API payload it was parsed from (`raw_json_file`) and the provider's event
+id. Joining every one of the 197,757 totals rows to its file and event
+(`nbatotals/evaluate/adapters/legacy_lake.py`, path from `NBA_LEGACY_ODDS_LAKE`)
+gives the snapshot time and the event's `commence_time`. All 197,757 rows were
+found, and every parsed line and price equals the file's (0 mismatches, after
+switching the adapter to the provider's decimal prices: the legacy American
+columns were rounded from them, e.g. 1.91 became −109). One event appears twice
+in one file (2025-03-20 close); the first listing is used.
+
+What the three legacy labels really are: fixed wall-clock snapshots, not lead
+times.
+
+| legacy label | captured at (US Eastern) | measured lead before tip, regular season, pre-tip quotes |
+|---|---|---|
+| `close` | 13:55 or 14:55 on game day | median 5.7 h; 5th–95th percentile 1.7–8.7 h |
+| `noon_local` | 02:25 or 03:25 on game day | median 17.2 h; 13.1–19.7 h |
+| `open` | 20:25 or 21:25, on the evening before **or of** the game | median 0.2–1.7 h; −1.7 to 25.1 h |
+
+So the legacy "close" is not a closing line (it is about six hours before tip),
+"noon_local" is an overnight snapshot, and "open" is the day before for some
+games and during or just before the game for others. Below, the anchors are
+labelled **open (~23h)**, **noon_local (~17h)** and **close (~6h)**. No true
+closing line exists in this data, which matters for reading the results: a
+line six hours out is, if anything, easier to beat than the real close.
+
+Rules applied, decided from capture times only, before any grading:
+
+1. A quote captured at or after its event's `commence_time` is in-play and is
+   dropped. That removes 3,461 to 8,301 "open" rows a season (634 to 730 games
+   affected) and 141 to 291 "close" rows (19 to 22 games a season, afternoon
+   tip-offs). No noon_local row is in-play.
+2. A quote whose event commences on a different US Eastern date than the game
+   (a rescheduled game) is dropped: 1 to 75 rows per season and anchor.
+3. An open consensus captured at or after the same game's close capture is not
+   an open and is dropped (1,279 game-seasons in total). What remains of the
+   open is the evening-before snapshot: median lead 22.7 h (5th–95th
+   percentile 18–25 h).
+
+Sanity table after these rules (regular season):
+
+| season | anchor | games | books (median) | line mean | line SD | mean p_over | quarter-point share | MAE vs actual |
+|---|---|---|---|---|---|---|---|---|
+| 2021-22 | open (~23h) | 379 | 9 | 221.8 | 8.4 | 0.500 | 0.061 | 14.20 |
+| 2021-22 | noon_local (~17h) | 826 | 15 | 221.7 | 8.0 | 0.500 | 0.070 | 14.62 |
+| 2021-22 | close (~6h) | 1,193 | 17 | 220.9 | 8.4 | 0.501 | 0.040 | 14.40 |
+| 2022-23 | open (~23h) | 423 | 8 | 227.7 | 6.8 | 0.500 | 0.059 | 13.79 |
+| 2022-23 | noon_local (~17h) | 860 | 17 | 228.1 | 6.8 | 0.500 | 0.031 | 14.26 |
+| 2022-23 | close (~6h) | 1,211 | 19 | 228.5 | 7.2 | 0.500 | 0.023 | 14.21 |
+| 2023-24 | open (~23h) | 621 | 6 | 227.3 | 10.4 | 0.500 | 0.106 | 14.31 |
+| 2023-24 | noon_local (~17h) | 1,226 | 13 | 227.9 | 9.8 | 0.500 | 0.074 | 14.29 |
+| 2023-24 | close (~6h) | 1,220 | 14 | 227.9 | 9.9 | 0.500 | 0.068 | 14.28 |
+| 2024-25 | open (~23h) | 622 | 6 | 226.5 | 8.3 | 0.500 | 0.137 | 14.63 |
+| 2024-25 | noon_local (~17h) | 1,237 | 10 | 226.9 | 8.2 | 0.500 | 0.084 | 14.37 |
+| 2024-25 | close (~6h) | 1,218 | 10 | 226.8 | 8.6 | 0.500 | 0.068 | 14.24 |
+
+The look-ahead signature is gone: corr(anchor − close, actual − close) is
+−0.010 for the open (1,989 games) and −0.001 for noon_local (4,086 games),
+against 0.39 before the in-play rows were removed. Mean absolute move to the
+close: open 1.8 to 2.1 points, noon_local 1.6 to 2.0. The open covers only 379
+to 622 games a season, so open-anchor CLV rests on about 1,650 test-season
+games.

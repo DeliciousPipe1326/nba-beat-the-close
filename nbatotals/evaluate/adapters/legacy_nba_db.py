@@ -11,6 +11,13 @@ Legacy tables read (read-only):
     team_game_stats  -> team_box   (possessions/pace/ratings recomputed from counts)
     odds_truth       -> odds_snapshots  (snapshot_type noon_local -> anchor pretip)
 
+Capture times: odds_truth has none. If NBA_LEGACY_ODDS_LAKE points at the raw
+The Odds API payloads the rows were parsed from, every row is joined to its
+source file and event (see legacy_lake.py) and gets the file's snapshot time
+as captured_utc and the event's commence_time as its tip. Rows captured at or
+after tip (in-play) or whose event commences on a different US Eastern date
+than the game are then unusable.
+
 Run `python -m nbatotals.evaluate.adapters.legacy_nba_db` to print the
 verification report.
 """
@@ -26,6 +33,7 @@ import numpy as np
 import pandas as pd
 
 from nbatotals import boxscore, store
+from nbatotals.evaluate.adapters import legacy_lake
 from nbatotals.teams import BDL_ID_TO_ALIAS
 
 SOURCE = "legacy_nba_db"
@@ -109,14 +117,23 @@ def read_odds(con: sqlite3.Connection) -> pd.DataFrame:
     o = pd.read_sql_query(
         """SELECT CAST(game_id AS INTEGER) AS game_id, bookmaker AS book,
                   market_type AS market, snapshot_type, hours_before_game,
-                  snapshot_timestamp, home_team_id,
+                  snapshot_timestamp, home_team_id, raw_json_file, api_game_id,
                   total_line, total_over_odds, total_under_odds,
                   spread_home, spread_home_odds, spread_away_odds,
-                  ml_home_odds, ml_away_odds
+                  ml_home_odds, ml_away_odds,
+                  total_over_decimal, total_under_decimal, spread_home_decimal,
+                  spread_away_decimal, ml_home_decimal, ml_away_decimal
            FROM odds_truth""",
         con,
     )
-    dec = lambda s: s.map(boxscore.american_to_decimal, na_action="ignore").astype(float)
+
+    # The provider sent decimal prices; the legacy American columns were rounded
+    # from them (1.91 became -109). Use the decimal columns, which match the raw
+    # payloads, and convert American only where a decimal is missing.
+    def dec(american_col):
+        decimal = o[american_col.replace("_odds", "_decimal")]
+        return decimal.where(decimal.notna(), o[american_col].map(boxscore.american_to_decimal, na_action="ignore")).astype(float)
+
     totals = o["market"].eq("totals")
     spreads = o["market"].eq("spreads")
     h2h = o["market"].eq("h2h")
@@ -129,16 +146,18 @@ def read_odds(con: sqlite3.Connection) -> pd.DataFrame:
             "captured_utc": o["snapshot_timestamp"].replace("", None),
             "nominal_hours_before": o["hours_before_game"],
             "line": np.select([totals, spreads], [o["total_line"], o["spread_home"]], np.nan),
-            "over_price": dec(o["total_over_odds"]).where(totals),
-            "under_price": dec(o["total_under_odds"]).where(totals),
+            "over_price": dec("total_over_odds").where(totals),
+            "under_price": dec("total_under_odds").where(totals),
             "home_price": np.select(
-                [spreads, h2h], [dec(o["spread_home_odds"]), dec(o["ml_home_odds"])], np.nan
+                [spreads, h2h], [dec("spread_home_odds"), dec("ml_home_odds")], np.nan
             ),
             "away_price": np.select(
-                [spreads, h2h], [dec(o["spread_away_odds"]), dec(o["ml_away_odds"])], np.nan
+                [spreads, h2h], [dec("spread_away_odds"), dec("ml_away_odds")], np.nan
             ),
             "source": SOURCE,
             "legacy_home_team_id": o["home_team_id"],
+            "raw_json_file": o["raw_json_file"],
+            "api_game_id": o["api_game_id"],
         }
     )
     if out["anchor"].isna().any():
@@ -146,11 +165,47 @@ def read_odds(con: sqlite3.Connection) -> pd.DataFrame:
     return out
 
 
-def load(path: str | os.PathLike | None = None) -> dict[str, pd.DataFrame]:
+def attach_capture_times(odds: pd.DataFrame, games: pd.DataFrame, lake: pd.DataFrame) -> pd.DataFrame:
+    """Join each legacy row to its source file and event; add timing columns and flags."""
+    odds = odds.copy()
+    odds["file_key"] = odds["raw_json_file"].map(legacy_lake.file_key)
+    cols = ["file_key", "event_id", "book", "snapshot_utc", "commence_utc", "over_point", "over_price", "under_price"]
+    lk = lake[cols].rename(columns={"over_price": "file_over", "under_price": "file_under"})
+    # One event is listed twice in one file (2025-03-20 close); keep the first listing.
+    lk = lk.drop_duplicates(["file_key", "event_id", "book"], keep="first")
+    out = odds.merge(lk, left_on=["file_key", "api_game_id", "book"], right_on=["file_key", "event_id", "book"],
+                     how="left", validate="many_to_one")
+    snap = pd.to_datetime(out["snapshot_utc"], utc=True)
+    tip = pd.to_datetime(out["commence_utc"], utc=True)
+    out["captured_utc"] = snap.dt.strftime("%Y-%m-%dT%H:%M:%SZ").where(snap.notna(), None)
+    out["commence_utc"] = tip.dt.strftime("%Y-%m-%dT%H:%M:%SZ").where(tip.notna(), None)
+    out["lead_hours"] = (tip - snap).dt.total_seconds() / 3600.0
+    out["lake_match"] = snap.notna()
+    out["in_play"] = out["lake_match"] & (out["lead_hours"] <= 0)
+    tip_date = tip.dt.tz_convert("America/New_York").dt.strftime("%Y-%m-%d")
+    game_date = out["game_id"].map(games.set_index("id")["game_date"])
+    out["date_mismatch"] = out["lake_match"] & (tip_date != game_date)
+    totals = out["market"].eq("totals") & out["lake_match"]
+    out["parse_mismatch"] = totals & (
+        (out["line"] != out["over_point"])
+        | ((out["over_price"] - out["file_over"]).abs() > 1e-9)
+        | ((out["under_price"] - out["file_under"]).abs() > 1e-9)
+    )
+    return out.drop(columns=["event_id", "snapshot_utc", "over_point", "file_over", "file_under"])
+
+
+def tip_times(odds: pd.DataFrame) -> pd.Series:
+    """Per game, the provider's commence_time from rows whose date matches the game."""
+    ok = odds[odds["lake_match"] & ~odds["date_mismatch"]]
+    return ok.groupby("game_id")["commence_utc"].agg(lambda s: s.mode().iloc[0])
+
+
+def load(path: str | os.PathLike | None = None, lake: str | os.PathLike | None = None) -> dict[str, pd.DataFrame]:
     """Return {'games', 'team_box', 'odds_raw'} in the new schema's shapes.
 
-    'odds_raw' still contains structurally unusable rows (a missing or invalid
-    price); `usable_odds` drops them so they can be counted first.
+    'odds_raw' still contains unusable rows (a missing price; with the lake,
+    in-play or wrong-date quotes); `usable_odds` drops them so they can be
+    counted first. The lake join runs when `lake` or NBA_LEGACY_ODDS_LAKE is set.
     """
     con = _connect_ro(legacy_path(path))
     try:
@@ -159,6 +214,9 @@ def load(path: str | os.PathLike | None = None) -> dict[str, pd.DataFrame]:
         odds = read_odds(con)
     finally:
         con.close()
+    if lake or os.environ.get(legacy_lake.ENV_VAR):
+        odds = attach_capture_times(odds, games, legacy_lake.read_lake(lake))
+        games["tip_utc"] = games["id"].map(tip_times(odds)).where(lambda s: s.notna(), games["tip_utc"])
     return {"games": games, "team_box": team_box, "odds_raw": odds}
 
 
@@ -166,7 +224,10 @@ def usable_odds(odds: pd.DataFrame) -> pd.DataFrame:
     totals = odds["market"].eq("totals")
     ok_totals = odds["line"].notna() & odds["over_price"].notna() & odds["under_price"].notna()
     ok_other = odds["home_price"].notna() & odds["away_price"].notna()
-    return odds[np.where(totals, ok_totals, ok_other)]
+    ok = np.where(totals, ok_totals, ok_other)
+    if "lake_match" in odds:
+        ok = ok & odds["lake_match"] & ~odds["in_play"] & ~odds["date_mismatch"] & ~odds["parse_mismatch"]
+    return odds[ok]
 
 
 def write_store(frames: dict[str, pd.DataFrame], out: str | os.PathLike) -> Path:
@@ -177,7 +238,10 @@ def write_store(frames: dict[str, pd.DataFrame], out: str | os.PathLike) -> Path
     con = store.connect(out)
     games = frames["games"]
     box = frames["team_box"].drop(columns=["legacy_pace"])
-    odds = usable_odds(frames["odds_raw"]).drop(columns=["legacy_home_team_id"])
+    odds = usable_odds(frames["odds_raw"])[
+        ["game_id", "book", "market", "anchor", "captured_utc", "nominal_hours_before", "line",
+         "over_price", "under_price", "home_price", "away_price", "source"]
+    ]
     odds = odds[odds["game_id"].isin(games["id"])]
     games.to_sql("games", con, if_exists="append", index=False)
     box.to_sql("team_box", con, if_exists="append", index=False)
@@ -247,7 +311,23 @@ def verify(frames: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame | dict]:
         ),
         "totals_rows_missing_a_price": int((~tot["has_both_prices"]).sum()),
     }
+    timing = {}
+    if "lake_match" in odds:
+        t2 = odds[odds["market"] == "totals"].merge(games[["id", "season", "postseason"]], left_on="game_id",
+                                                    right_on="id")
+        t2 = t2[t2["postseason"] == 0]
+        timing["lead_hours_by_season_anchor"] = t2[t2["lake_match"] & ~t2["date_mismatch"]].groupby(
+            ["season", "anchor"])["lead_hours"].describe(percentiles=[0.05, 0.5, 0.95])[["count", "5%", "50%", "95%"]]
+        timing["flags_by_season_anchor"] = t2.groupby(["season", "anchor"]).agg(
+            rows=("game_id", "size"),
+            not_in_lake=("lake_match", lambda s: int((~s).sum())),
+            in_play_rows=("in_play", "sum"),
+            in_play_games=("game_id", lambda s: int(s[t2.loc[s.index, "in_play"]].nunique())),
+            wrong_date_rows=("date_mismatch", "sum"),
+            parse_mismatch_rows=("parse_mismatch", "sum"),
+        )
     return {
+        **timing,
         "per_season": per_season,
         "totals_by_season_anchor": totals_by,
         "close_coverage": coverage,
