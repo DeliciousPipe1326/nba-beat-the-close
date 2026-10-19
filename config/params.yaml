@@ -1,0 +1,9 @@
+# nbatotals parameters. Every number the engine uses lives here.
+# Model parameters (blend weights, priors, pace and efficiency coefficients,
+# home-court and rest adjustments) are added in Phase 2.
+
+market:
+  # Pre-registered in docs/PREREGISTRATION.md; changing these after seeing
+  # results invalidates the comparison.
+  outlier_points: 10      # drop a book whose line is this far from the cross-book median
+  min_books: 3            # books needed (after the outlier rule) to score a game at an anchor
