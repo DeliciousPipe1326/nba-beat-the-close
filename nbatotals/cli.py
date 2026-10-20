@@ -57,8 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
                     help="comma list (default opening,t-10h,t-5h,t-1h,t-15m; aliases noon, afternoon, near_close, "
                          "true_close)")
     bf.add_argument("--markets", default="totals", help="comma list of totals, spreads, h2h (default totals)")
-    bf.add_argument("--regions", default="us,eu", help="comma list of us, us2, uk, eu, au (default us,eu)")
-    bf.add_argument("--books", default=None, help="comma list of bookmaker keys (replaces --regions)")
+    bf.add_argument("--books", default=None, help="comma list of bookmaker keys (default: the provider's us region)")
     bf.add_argument("--max-credits", type=int, default=None, help="never spend more than this")
     bf.add_argument("--dry-run", action="store_true", help="print the plan and its cost; make no request")
     bf.add_argument("--yes", action="store_true", help="skip the confirmation prompt (the credit checks still apply)")
@@ -357,19 +356,26 @@ def cmd_backfill(args) -> int:
     try:
         summary = theodds_history.backfill(
             con, params_io.load(args.params), args.season, anchors=_split(args.anchors),
-            markets=_split(args.markets), regions=_split(args.regions), books=_split(args.books),
+            markets=_split(args.markets), books=_split(args.books),
             max_credits=args.max_credits, dry_run=args.dry_run, confirm=(lambda text: True) if args.yes else None)
     except (common.MissingKeyError, common.ApiError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     finally:
         con.close()
+    plan = summary.pop("per_game_plan")
+    if plan:
+        import pandas as pd
+
+        path = ROOT / "out" / f"backfill_plan_{args.season}.csv"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(plan).to_csv(path, index=False)
+        print(f"full per-game plan: {path}")
     print(json.dumps({k: v for k, v in summary.items() if k != "plan"}, indent=2, default=str))
     return 0 if not summary["stopped"] or summary["dry_run"] else 3
 
 
 def cmd_backtest_store(args) -> int:
-    import pandas as pd
 
     from nbatotals import data, store
     from nbatotals import params as params_io
@@ -379,14 +385,13 @@ def cmd_backtest_store(args) -> int:
     con = store.connect(args.db)
     try:
         games, box = data.load_frames(con)
-        quotes = pd.read_sql_query("SELECT * FROM odds_snapshots WHERE market = 'totals' AND game_id IS NOT NULL "
-                                   "AND anchor NOT LIKE 'legacy_%'", con)
+        quotes = backtest.store_quotes(con)
     finally:
         con.close()
     if quotes.empty:
         print(f"{args.db}: no totals odds; run backfill-odds (or poll-odds) first", file=sys.stderr)
         return 2
-    spec = backtest.store_spec(quotes["anchor"].unique())
+    spec = backtest.store_spec(quotes["anchor"].unique(), quotes.groupby("anchor")["lead_minutes"].median().to_dict())
     ref_seasons = set(games.loc[games["id"].isin(quotes.loc[quotes["anchor"] == spec.ref, "game_id"]), "season"])
     box_seasons = set(games.loc[games["id"].isin(box["game_id"]), "season"])
     seasons = tuple(sorted(int(s) for s in ref_seasons if any(b < s for b in box_seasons)))

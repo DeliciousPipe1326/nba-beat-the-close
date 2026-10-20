@@ -68,17 +68,33 @@ BREAKEVEN_110 = 110 / 210
 STORE_ORDER = ("opening", "t-10h", "t-5h", "t-3h", "t-2h", "t-1h", "t-15m", "close")
 
 
-def store_spec(anchors) -> MarketSpec:
-    """The market spec for odds in a local store (live polling or backfill-odds): the reference is
-    T−15 min if present, else the live `close`, else the latest anchor; CLV from every earlier one."""
-    present = [a for a in STORE_ORDER if a in set(anchors)]
+def store_quotes(con) -> pd.DataFrame:
+    """Totals quotes the --store backtest uses: matched to a game, legacy-table rows excluded."""
+    return pd.read_sql_query("SELECT * FROM odds_snapshots WHERE market = 'totals' AND game_id IS NOT NULL "
+                             "AND anchor NOT LIKE 'legacy_%'", con)
+
+
+def store_spec(anchors, leads: dict | None = None) -> MarketSpec:
+    """The market spec for odds in a local store (live polling, backfill-odds or a replay).
+
+    Live and backfill anchors keep their fixed order; any other names (a replay keeps recorded bucket names)
+    are ordered by `leads` (median minutes before tip, largest first). The reference is T−15 min if present,
+    else the live `close`, else the anchor nearest tip; CLV is measured from every earlier one."""
+    names = list(dict.fromkeys(anchors))
+    if all(a in STORE_ORDER for a in names):
+        present = [a for a in STORE_ORDER if a in names]
+        ref = "t-15m" if "t-15m" in present else ("close" if "close" in present else present[-1])
+    else:
+        if leads is None:
+            raise ValueError(f"anchors {sorted(names)} need their leads to be ordered")
+        present = sorted(names, key=lambda a: -leads[a])
+        ref = present[-1]
     if not present:
-        raise ValueError(f"no known anchors among {sorted(set(anchors))}; expected some of {STORE_ORDER}")
-    ref = "t-15m" if "t-15m" in present else ("close" if "close" in present else present[-1])
-    clv_from = tuple(a for a in present if a not in (ref, "close") and STORE_ORDER.index(a) < STORE_ORDER.index(ref))
+        raise ValueError("no anchors")
+    clv_from = tuple(a for a in present[:present.index(ref)] if a != "close")
     pretip = "t-10h" if "t-10h" in clv_from else (clv_from[0] if clv_from else ref)
     return MarketSpec(anchors=clv_from + (ref,), ref=ref, clv_from=clv_from, pretip=pretip,
-                      headline_clv=clv_from[:2], labels={a: market.ANCHOR_LABELS[a] for a in present})
+                      headline_clv=clv_from[:2], labels={a: market.ANCHOR_LABELS.get(a, a) for a in present})
 
 
 def _seasons(pred: pd.DataFrame) -> list:

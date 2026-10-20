@@ -1,7 +1,12 @@
 """Backfill the store's odds_snapshots for past games from The Odds API historical endpoint.
 
-    python -m nbatotals backfill-odds --season 2024 [--anchors ...] [--markets ...] [--regions ...]
-                                       [--books ...] [--max-credits N] [--dry-run] [--yes]
+    python -m nbatotals backfill-odds --season 2024 [--anchors ...] [--markets ...] [--books ...]
+                                       [--max-credits N] [--dry-run] [--yes]
+
+A head start for building your own backtest store, not a product: it was
+exercised on synthetic responses and by replaying the author's recorded
+historical responses (nbatotals/evaluate/adapters/legacy_replay.py), never
+against the live API from this repository.
 
 Every rule below comes from a data defect found in the author's earlier work
 (README, "Lessons"; docs/RESULTS.md, Appendix B), and is enforced here rather
@@ -27,9 +32,13 @@ than left to the user:
 - Nothing is spent until the cost is printed and confirmed: calls x credits per
   call (the provider's published rate for historical odds is 10 per market per
   region, or per group of 10 bookmakers), checked against the credits remaining
-  and --max-credits. After the first paid call the real cost per call
-  (x-requests-last) replaces the estimate. --dry-run prints the plan and makes
-  no request at all. Every request is logged to api_usage.
+  and --max-credits. --dry-run prints the plan and makes no request at all and
+  needs no key. Every request is logged to api_usage.
+
+TODO: re-price from the response headers after the first paid call
+(x-requests-last is the cost of that call, x-requests-remaining the balance)
+and stop early if the rest no longer fits. Today the worst-case estimate is
+checked once, before the first paid call.
 
 The data you fetch is licensed to you by the provider: keep it in your local
 store; do not redistribute it.
@@ -144,9 +153,31 @@ def plan_text(season: int, counts: dict, est: dict, anchors: dict, markets, regi
         f"(game, anchor) pairs already stored: {counts['game_anchors_already_stored']:,}.",
         f"Calls: {est['calls']:,} (games in the same 5-minute snapshot window share a call), "
         f"up to {est['worst_case_calls']:,} if openings need later snapshots.",
-        f"Credits: {est['credits_per_call']} per call (10 x markets x regions) = {est['credits']:,}; "
-        f"worst case {est['worst_case_credits']:,}.",
+        f"Credits: {est['credits_per_call']} per call (10 x markets x regions, the provider's published rate) "
+        f"= {est['credits']:,}; worst case {est['worst_case_credits']:,}.",
+        "This is the published rate; the real cost of each call is in its x-requests-last header and is "
+        "logged to api_usage.",
     ])
+
+
+def per_game_plan(requests: list[Request]) -> list[dict]:
+    """One row per (game, anchor): when it would be requested and with which other games it shares the call."""
+    rows = []
+    for r in requests:
+        for gid, tip in r.games:
+            rows.append({"game_id": gid, "tip_utc": common.iso(tip), "anchor": r.anchor, "lead_minutes": r.lead,
+                         "request_at_utc": common.iso(r.at), "games_in_call": len(r.games),
+                         "fallback_leads": ",".join(str(x) for x in r.fallback)})
+    return sorted(rows, key=lambda x: (x["tip_utc"], x["game_id"], -x["lead_minutes"]))
+
+
+def per_game_text(rows: list[dict], limit: int = 12) -> str:
+    head = "game_id  tip (UTC)             anchor   lead  request at (UTC)      games in call  fallbacks"
+    lines = [head] + [f"{r['game_id']:<8} {r['tip_utc']}  {r['anchor']:<8} {r['lead_minutes']:>5}  "
+                      f"{r['request_at_utc']}  {r['games_in_call']:>13}  {r['fallback_leads']}" for r in rows[:limit]]
+    if len(rows) > limit:
+        lines.append(f"... {len(rows) - limit:,} more (game, anchor) rows in the full plan file")
+    return "\n".join(lines)
 
 
 def fetch_snapshot(session, key: str, sport: str, at: dt.datetime, markets, regions, books):
@@ -191,20 +222,13 @@ def store_rows(con: sqlite3.Connection, rows: list[dict]) -> int:
     return sum(con.execute(sql, [r[c] for c in STORE_COLUMNS]).rowcount for r in rows)
 
 
-@dataclass
-class Budget:
-    remaining: int | None
-    cap: int | None
-    per_call: int
-    spent: int = 0
-
-    def affordable(self, calls: int) -> tuple[bool, str]:
-        need = calls * self.per_call
-        if self.remaining is not None and need > self.remaining:
-            return False, f"needs up to {need:,} credits, {self.remaining:,} remain"
-        if self.cap is not None and self.spent + need > self.cap:
-            return False, f"needs up to {self.spent + need:,} credits, over --max-credits {self.cap:,}"
-        return True, ""
+def affordable(calls: int, per_call: int, remaining: int | None, cap: int | None) -> tuple[bool, str]:
+    need = calls * per_call
+    if remaining is not None and need > remaining:
+        return False, f"needs up to {need:,} credits, {remaining:,} remain"
+    if cap is not None and need > cap:
+        return False, f"needs up to {need:,} credits, over --max-credits {cap:,}"
+    return True, ""
 
 
 def _remaining_credits(con, session, key: str, now) -> int | None:
@@ -219,18 +243,14 @@ def _add(summary: dict, counts: dict) -> None:
         summary["drops"][k] = summary["drops"].get(k, 0) + v
 
 
-def run_requests(con, queue: deque, budget: Budget, fetch, now, summary: dict) -> dict:
-    """Execute the queue; re-price after the first call; stop before the budget would be exceeded."""
+def run_requests(con, queue: deque, fetch, now, summary: dict) -> dict:
+    """Execute the queue (the worst-case cost was checked before the first call)."""
     lookup = theodds._games_lookup(con)
     while queue:
         req = queue.popleft()
         payload, headers = fetch(req)
-        usage = common.log_usage(con, PROVIDER, "historical_odds", headers, now())
+        common.log_usage(con, PROVIDER, "historical_odds", headers, now())
         summary["calls"] += 1
-        budget.spent += usage["cost"] or budget.per_call
-        budget.remaining = usage["remaining"] if usage["remaining"] is not None else budget.remaining
-        if summary["calls"] == 1 and usage["cost"]:
-            budget.per_call = usage["cost"]
         rows, counts, missing = parse_snapshot(payload, req, lookup)
         summary["rows_written"] += store_rows(con, rows)
         con.commit()
@@ -240,10 +260,6 @@ def run_requests(con, queue: deque, budget: Budget, fetch, now, summary: dict) -
             queue.extendleft(reversed(requests_for(req.anchor, req.fallback, later)))
         elif missing:
             summary["game_anchors_not_listed"] += len(missing)
-        ok, why = budget.affordable(len(queue) + sum(len(r.fallback) for r in queue))
-        if queue and not ok:
-            summary["stopped"] = f"stopped after {summary['calls']} calls: {why}"
-            break
     return summary
 
 
@@ -256,20 +272,22 @@ def backfill(con: sqlite3.Connection, params: dict, season: int, *, anchors=None
     est = estimate(requests, per_call)
     out(plan_text(season, counts, est, anchors, markets, regions, books))
     summary = {"plan": counts, "estimate": est, "calls": 0, "rows_written": 0, "drops": {},
-               "game_anchors_not_listed": 0, "stopped": None, "dry_run": dry_run}
+               "game_anchors_not_listed": 0, "stopped": None, "dry_run": dry_run,
+               "per_game_plan": per_game_plan(requests)}
     if dry_run or not requests:
-        out("Dry run: no request was made." if dry_run else "Nothing to fetch.")
+        out(per_game_text(summary["per_game_plan"]))
+        out("Dry run: no request was made and no key is needed." if dry_run else "Nothing to fetch.")
         return summary
     key = key or common.get_key(theodds.KEY_VAR)
     session = session or common.default_session()
     clock = now or common.now_utc
-    budget = Budget(_remaining_credits(con, session, key, clock()), max_credits, per_call)
-    ok, why = budget.affordable(est["worst_case_calls"])
+    remaining = _remaining_credits(con, session, key, clock())
+    ok, why = affordable(est["worst_case_calls"], per_call, remaining, max_credits)
     if not ok:
         summary["stopped"] = f"refused before any paid call: {why}"
         out(summary["stopped"])
         return summary
-    ask = f"Spend up to {est['worst_case_credits']:,} credits ({budget.remaining} remaining)? Type yes to continue: "
+    ask = f"Spend up to {est['worst_case_credits']:,} credits ({remaining} remaining)? Type yes to continue: "
     if not (confirm or (lambda text: input(text).strip().lower() == "yes"))(ask):
         summary["stopped"] = "not confirmed"
         return summary
@@ -277,4 +295,4 @@ def backfill(con: sqlite3.Connection, params: dict, season: int, *, anchors=None
     def fetch(req: Request):
         return fetch_snapshot(session, key, params["ingest"]["theodds"]["sport"], req.at, markets, regions, books)
 
-    return run_requests(con, deque(requests), budget, fetch, clock, summary)
+    return run_requests(con, deque(requests), fetch, clock, summary)

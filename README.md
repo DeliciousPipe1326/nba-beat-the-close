@@ -271,14 +271,26 @@ one earlier season, because every parameter is fitted on earlier seasons only.
 Its report goes to `out/` (git-ignored).
 
 **Cost.** Historical odds cost 10 credits per market per region per call, at
-the provider's published rate. The command reads the real cost from the first
-response and re-checks the budget. Run on the real 2024-25 schedule (1,321
-games), the dry run plans **4,520 calls** at the default anchors (opening,
-T−10h, T−5h, T−1h, T−15 min), totals only, regions us and eu: **about 90,000
-credits** (up to about 127,000 if openings need later snapshots). With all three
-markets and four regions it is about 540,000. Games are grouped so that games in
-the same 5-minute snapshot window share a call, and nothing already stored is
-fetched again.
+the provider's published rate; the default is the provider's `us` region, or
+pass `--books` with a list of bookmaker keys (10 credits per 10 books). Run on
+the real 2024-25 schedule (1,321 games), the dry run plans **4,520 calls** at
+the default anchors (opening, T−10h, T−5h, T−1h, T−15 min), totals only: **about
+45,000 credits** (up to about 63,000 if openings need later snapshots); all
+three markets triple that. Games in the same 5-minute snapshot window share a
+call, and nothing already stored is fetched again. The worst case is checked
+against the credits remaining and `--max-credits` once, before the first paid
+call; re-pricing from each response's `x-requests-last` and
+`x-requests-remaining` headers is a TODO in
+[`theodds_history.py`](nbatotals/ingest/theodds_history.py).
+
+**Checked on recorded responses, not live.** Replaying the author's 7,851
+recorded 2024-25 per-event responses through the same parse, join and store
+code (a maintainer-only test, `tests/test_replay_legacy.py`) dropped 31 events
+already in play and none beyond the 36-hour maximum lead, stored 222,297 rows,
+and put the `strict_close` bucket within 0.5 points of the multi-region true close on
+84.1% of 1,287 games, with a mean devigged P(over) of 0.500. The recorded
+snapshots are 10 minutes apart in 2021-22 and 5 minutes apart from 2022-23 on,
+so the snapshot returned can be up to that long before the requested time.
 
 **What it refuses to do**, each a defect found in the author's earlier data
 (see "Lessons" below):
@@ -413,3 +425,8 @@ committed. BallDontLie, The Odds API and Dunks & Threes data is licensed to
 whoever fetched it, so fetch it with your own keys into the git-ignored `data/`
 folder. `.gitignore` excludes `.env*`, `data/`, databases, parquet, CSV, logs and
 model binaries; keep it that way.
+
+The author no longer runs live collection. The fetch paths (`ingest-*`,
+`today`, `backfill-odds`) were last exercised on synthetic fixtures, the
+providers' documentation and, for `backfill-odds`, recorded responses; if a
+provider has changed something, issues and pull requests are welcome.

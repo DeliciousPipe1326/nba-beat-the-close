@@ -126,13 +126,6 @@ def test_dry_run_and_gates_spend_nothing(con):
     assert out["stopped"] == "not confirmed" and len(no.calls) == 1
 
 
-def test_real_cost_from_first_call_reprices_and_stops(con):
-    expensive = FakeResponse({"timestamp": "2025-01-11T00:15:00Z", "data": []}, headers=quota_headers(0, 20, 25))
-    s = FakeSession({"/sports": FakeResponse([], headers=quota_headers(0, 50, 0)), "/odds": [expensive] * 3})
-    out = _backfill(con, s)  # estimate 2 x 20 = 40 <= 50; the first call really costs 25 and leaves 20 < 25
-    assert out["calls"] == 1 and "stopped after 1 calls" in out["stopped"]
-
-
 def test_opening_falls_back_to_later_snapshots(con):
     early = snapshot("2025-01-09T12:30:00Z", [])  # nothing listed 36 h out
     later = snapshot("2025-01-10T00:30:00Z", [odds_event(dict(BOS_NYK, commence_time=TIP1), 220.0,
@@ -163,3 +156,39 @@ def test_backtest_store_mode_on_the_synthetic_league(tmp_path):
     md = out.read_text()
     assert "## Headline (primary cell: tuned model, T−15 min, every game)" in md
     assert "| 2022-23 |" in md and "opening" in md
+
+
+# --------------------------------------------------------------------------- replay (synthetic recorded files)
+
+def _write(path, payload):
+    import json
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload))
+
+
+def test_replay_runs_recorded_responses_through_the_backfill_path(con, tmp_path):
+    from nbatotals.evaluate.adapters import legacy_replay
+
+    def recorded(name, requested, snapshot, event, game_id="evA"):
+        _write(tmp_path / "rec" / "season=2024-25" / name / "data.json",
+               {"_metadata": {"bucket_name": "strict_close", "requested_timestamp": requested,
+                              "api_game_id": game_id}, "data": {"timestamp": snapshot, "data": [event]}})
+
+    # wrapped payload; the metadata names the requested event and the bucket
+    recorded("a", "2025-01-11T00:27:00Z", "2025-01-11T00:25:00Z",
+             odds_event(dict(BOS_NYK, commence_time=TIP1), 221.5, last_update="2025-01-11T00:20:00Z"))
+    recorded("b", "2025-01-11T03:05:00Z", "2025-01-11T03:05:00Z",  # polled after tip: in play
+             odds_event(dict(LAL_GSW, id="evB", commence_time=TIP2), 230.5), game_id="evB")
+    recorded("c", "2025-01-09T00:00:00Z", "2025-01-09T00:00:00Z",  # 48 h before tip: beyond the planner's leads
+             odds_event(dict(LAL_GSW, id="evC", commence_time=TIP2), 229.5), game_id="evC")
+    _write(tmp_path / "rec" / "season=2024-25" / "d" / "data.json", {"timestamp": "2025-01-11T00:25:00Z", "data": []})
+    s = legacy_replay.replay(con, tmp_path / "rec", season=2024, now=lambda: utc("2026-10-20T12:00:00Z"))
+    assert s["files"] == 3 and s["skipped"]["no_metadata"] == 1
+    assert s["events"]["in_play"] == 1 and s["events"]["beyond_max_lead"] == 1 and s["events"]["requested"] == 1
+    rows = con.execute("SELECT DISTINCT game_id, anchor, nominal_lead_minutes, lead_minutes, captured_utc, "
+                       "commence_utc FROM odds_snapshots").fetchall()
+    # bucket kept as the anchor; nominal lead = tip - requested time (3 min), measured lead from the snapshot (5)
+    assert rows == [(1, "strict_close", 3.0, 5.0, "2025-01-11T00:25:00Z", TIP1)]
+    assert {r[0] for r in con.execute("SELECT endpoint FROM api_usage")} == {"historical_odds (replay)"}
+    assert legacy_replay.replay(con, tmp_path / "rec", season=2024)["rows_written"] == 0  # idempotent

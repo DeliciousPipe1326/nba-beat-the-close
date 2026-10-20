@@ -67,22 +67,23 @@ module constants.
 ## Numbers before and after this pass
 
 Measured on 20 October 2026: before at f1bbfae (main after the five experiment
-merges), after at the commit that adds this file. Same tool versions: ruff
-0.17.1, mypy 2.4.0, radon 6.0.1.
+merges); after at the end of the pass, which also includes the demo, report and
+backfill-odds commands added in the same pass. Same tool versions: ruff 0.17.1,
+mypy 2.4.0, radon 6.0.1.
 
 | Check | Before | After |
 |---|---|---|
 | ruff findings (rules above, line length 120) | 156 (73 long lines, 26 `import params as P`, 18 `zip` without `strict`, 13 upper-case locals, 9 lambda assignments, …) | 0 |
-| mypy errors, `check_untyped_defs`, nbatotals + tests | 31 in 15 files (16 in 8 files with the narrower flags of the first scan) | 0 in 71 files |
+| mypy errors, `check_untyped_defs`, nbatotals + tests (+ scripts after) | 31 in 15 files (16 in 8 files with the narrower flags of the first scan) | 0 in 79 files |
 | radon, highest function complexity | 32 (`market_vs_market.report_markdown`, grade E) | 15 |
-| radon, functions at grade C (11–20) / D / E | 19 / 0 / 1 | 12 / 0 / 0, all at 15 or below |
-| radon, average complexity | 3.93 over 498 blocks | 3.64 over 567 blocks |
+| radon, functions at grade C (11–20) / D / E | 19 / 0 / 1 | 16 / 0 / 0, all at 15 or below |
+| radon, average complexity | 3.93 over 498 blocks | 3.68 over 639 blocks |
 | radon maintainability index, `evaluate/props_market.py` | 13.62 (B) | 13.45 (B) |
 | radon maintainability index, `evaluate/market_vs_market.py` | 15.24 (B) | 12.99 (B) |
 | layering violations | 2 (`model.pace_eff` → `evaluate`, `features.players` → `evaluate.adapters`) | 0, enforced by a test |
 | bandit, medium and above | 8 (6 `pickle.loads`, 2 string-built SQL) | 0 (pickle removed; the two placeholder lists annotated) |
 | vulture, 80% confidence | 2 unused variables | 0 |
-| tests | 126 passed, 2 skipped | 136 passed, 2 skipped |
+| tests | 126 passed, 2 skipped | 150 passed, 3 skipped (all three maintainer-only) |
 
 The two maintainability grades did not improve. The index penalises module
 size, and splitting long functions into named steps added lines. Both modules
