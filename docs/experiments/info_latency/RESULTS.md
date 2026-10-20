@@ -1,7 +1,7 @@
 # Results: Experiment 2, information latency
 
 Run 20 October 2026. The pre-registration ([PREREGISTRATION.md](PREREGISTRATION.md),
-commit 98a89f7) and the gate numbers ([GATE.md](GATE.md), commit 16ba5e3) were
+commit 2ef73f2) and the gate numbers ([GATE.md](GATE.md), commit 2b2323f) were
 both committed before any odds were read for this experiment. Every table quoted
 here comes from two generated files:
 

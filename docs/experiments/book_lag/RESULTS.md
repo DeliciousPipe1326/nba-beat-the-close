@@ -6,7 +6,7 @@ Every table below is copied from [report.md](report.md), which that command
 regenerates in full; re-running it and checking `git diff` shows whether the
 numbers reproduce (two runs from the same parsed payloads gave identical
 reports). Rules: [PREREGISTRATION.md](PREREGISTRATION.md), committed in
-c1a697d before any harness code existed. Harness: 177a69c.
+2a129e7 before any harness code existed. Harness: 7317825.
 
 Test seasons 2022-23, 2023-24 and 2024-25, regular season (the main study's
 game set). Fair value is Pinnacle's two-way multiplicatively devigged

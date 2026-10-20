@@ -35,7 +35,7 @@ noon onwards is zero.
 
 ## Search space (fixed before running)
 
-Declared and committed (b99938a) before any search ran. Objective: RMSE of
+Declared and committed (8d016ae) before any search ran. Objective: RMSE of
 `total_proj` vs actual total over the **training seasons'** regular-season
 games, all games including opening weeks, pooled across training seasons. No
 odds were read during the search, so the market changes in Amendments 1 and 2

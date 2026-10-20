@@ -24,7 +24,7 @@ onward, collected live with `nbatotals.ingest`.
 *[Edited 20 October 2026, after the results, at the author's request: figures
 from the earlier private work, whose code is not in this repository, were
 removed from this section and from "For scale" below. The original wording is
-in commit 6415b87. No rule, expectation or threshold changed.]*
+in commit f01c8d4. No rule, expectation or threshold changed.]*
 
 ## Hypotheses
 

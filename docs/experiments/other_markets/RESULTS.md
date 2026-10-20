@@ -15,7 +15,7 @@ those commands regenerate:
 [moneyline, pace_eff](backtest_legacy_h2h_report_pace_eff.md),
 [moneyline, elo_total](backtest_legacy_h2h_report_elo_total.md).
 The rules and expectations were committed before anything was computed
-([PREREGISTRATION.md](PREREGISTRATION.md), commit 6ed9336). The totals
+([PREREGISTRATION.md](PREREGISTRATION.md), commit 1e3b067). The totals
 pre-registration, its results and its reports are unchanged. Re-running the
 totals backtests for both projectors with this code rewrote
 `docs/backtest_legacy_report.md`, `docs/backtest_legacy_report_elo_total.md` and
