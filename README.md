@@ -1,11 +1,24 @@
 # nbatotals
 
-A transparent pace × efficiency engine for NBA game totals (over/under), a data
-engine that fetches today's fixtures and odds with your own API keys, and a
-backtest harness built so that it cannot flatter itself.
+## What this is
 
-**It does not beat the market.** That is the main result, and the reason to use
-this repository is to see exactly how it was measured.
+A toolkit for testing NBA betting models honestly. You bring your own API keys and your own model idea. It gives you the data, a baseline model, and a referee.
+
+**What it does**
+
+1. **Collects data** into a local database: games, box scores, and bookmaker odds for totals, spreads and moneyline, each odds quote stamped with when it was captured. Live from today onward, or backfilled for past seasons if you pay for history.
+2. **Projects games** with a simple, fully visible model: pace times scoring efficiency gives a total, and the same numbers give a margin and a win probability. Every setting is in one file.
+3. **Grades any model** against the real closing line, season by season, with confidence intervals and a fixed pass bar that was written down before the test ran. Plug in your own model with one small class and you get the identical report.
+
+**What it found**
+
+The included model, run on four seasons, does not beat the market in any of the three bet types. Nor did a professional public model, nor did price gaps between bookmakers, nor did player props. This repository publishes that result and the full method, so the next person starts from the truth instead of rediscovering it. Plug in your own model and find out whether yours does.
+
+**Your own model** is one Python class with a `name`, a `fit` and a `predict`, plus one line in the registry; then `python -m nbatotals backtest --store --model my_model` produces the same report the included model got. It may only use data dated before each game, and a test checks that for every registered model. See ["Building on this"](#building-on-this).
+
+**What it is not**
+
+Not a picks service, not a dashboard, not a bot. It will not make money. It will tell you quickly and reliably whether your idea does.
 
 ## What the backtest found
 
@@ -64,6 +77,41 @@ true win rate clears the 52.38% break-even you need roughly
 
 Three seasons give about 3,650 bets. That can find a large edge or rule one
 out; it cannot confirm a small one.
+
+## Three ways to use this
+
+The second is the point of the repository.
+
+1. **Look at it** (one minute, no keys): install, run the offline demo, open
+   `out/demo_report.html`. See ["Try it in one minute"](#try-it-in-one-minute).
+
+   ```bash
+   pip install -e . && python -m nbatotals demo
+   ```
+
+2. **Test your own model on past seasons:** keys in `.env`, build the store,
+   check the cost with a dry run, then backfill; write and register a projector
+   (["Building on this"](#building-on-this)) and grade it. See
+   ["Backfilling history"](#backfilling-history).
+
+   ```bash
+   python -m nbatotals init && python -m nbatotals ingest-games --season 2023 --season 2024 && python -m nbatotals ingest-box --season 2023 --season 2024
+   ```
+
+   ```bash
+   python -m nbatotals backfill-odds --season 2024 --dry-run
+   ```
+
+   ```bash
+   python -m nbatotals backfill-odds --season 2024 && python -m nbatotals backtest --store --model my_model
+   ```
+
+3. **Run it on today's games:** `poll-odds` on a schedule, then the day's CSV
+   and its HTML page. See ["Quick start"](#quick-start).
+
+   ```bash
+   python -m nbatotals poll-odds && python -m nbatotals today && python -m nbatotals report
+   ```
 
 ## Background
 
@@ -133,7 +181,11 @@ a bug until checks rule that out (see RESULTS.md for the eight it went through).
 
 The harness grades any projection the same way, so you can test your own model
 without touching it. A projector is a class with a `name`, a `fit` and a
-`predict` (the interface is in [nbatotals/model/base.py](nbatotals/model/base.py)):
+`predict` (the interface is in [nbatotals/model/base.py](nbatotals/model/base.py)).
+The harness hands it `games` (one row per game: date, season, teams, scores
+when final) and `box` (one row per team per game: possessions, points, pace and
+ratings), both from the local store, plus `params` from `config/params.yaml`;
+`targets` are the games to project.
 
 ```python
 import pandas as pd
@@ -153,22 +205,30 @@ class TeamPaceOnly:
         return pd.DataFrame({"game_id": f.game_id, "total_proj": pace * 2 * f.league_ortg / 100})
 ```
 
-1. **Register it:** add `TeamPaceOnly.name: TeamPaceOnly` to `PROJECTORS` in
-   [nbatotals/model/registry.py](nbatotals/model/registry.py).
+Put the class in its own file under `nbatotals/model/`, for example
+`nbatotals/model/my_model.py`, next to `pace_eff.py`, `league_avg.py` and
+`elo_total.py`.
+
+1. **Register it:** import it in
+   [nbatotals/model/registry.py](nbatotals/model/registry.py)
+   (`from nbatotals.model.my_model import MyModel`) and add
+   `MyModel.name: MyModel` to `PROJECTORS`; for the example above, that is
+   `TeamPaceOnly.name: TeamPaceOnly`.
 2. **Leakage test:** run `pytest tests/test_leakage.py`. It runs the truncation
    test on every registered projector: each game's projection must be identical
    when every row dated on or after that game is deleted.
 3. **The rule:** `fit()` sees only seasons before the one being tested and never
    odds; `predict()` may use only rows dated before each game. `state=None` means
    untuned (the values in params.yaml).
-4. **Backtest it:** `python -m nbatotals backtest --legacy --model team_pace_only`
-   writes `docs/backtest_legacy_report_team_pace_only.md` in exactly the
-   format of the pre-registered report. `python -m nbatotals backtest --legacy`
-   (the default model, `pace_eff`) regenerates
-   [docs/backtest_legacy_report.md](docs/backtest_legacy_report.md) byte for
-   byte. `--legacy` needs the maintainer's private data. With odds you have
-   collected yourself, call
+4. **Backtest it:** after backfilling (see "Backfilling history"),
+   `python -m nbatotals backtest --store --model team_pace_only` grades it on
+   your store and writes the report to `out/`, in the format of the
+   pre-registered report. With odds you have collected live, call
    `nbatotals.evaluate.backtest.run(games, box, odds, params, spec=backtest.LIVE, projector=...)`.
+   The author's private path, `python -m nbatotals backtest --legacy` (the
+   default model, `pace_eff`), needs the maintainer's data and regenerates
+   [docs/backtest_legacy_report.md](docs/backtest_legacy_report.md) byte for
+   byte.
 5. **Use it live:** `python -m nbatotals today --model team_pace_only`.
 
 The two example projectors described under "What it is" (`league_avg`,
