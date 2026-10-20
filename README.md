@@ -1,4 +1,6 @@
-# nbatotals
+# nba-beat-the-close
+
+Bring an NBA betting model; this grades it against the closing line. The Python package is called `nbatotals`, a name that predates its spreads and moneyline support.
 
 ## What this is
 
