@@ -82,7 +82,7 @@ def player_frames(games: pd.DataFrame, seed: int = 0) -> tuple[pd.DataFrame, pd.
 
     team_id = {a: i for i, a in NBA_STATS_ID_TO_ALIAS.items()}
     rng = np.random.default_rng(seed)
-    rating = {}
+    rating: dict[int, tuple[float, float, float]] = {}
     dnt, rat = [], []
     for g in games.sort_values(["game_date", "id"]).itertuples():
         for team in (g.home, g.away):

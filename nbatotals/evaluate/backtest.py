@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import gzip
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -204,7 +205,7 @@ def accuracy(pred: pd.DataFrame, w: pd.DataFrame, spec: MarketSpec = TRUE_CLOSE)
     rows = []
     for s in list(TEST_SEASONS) + ["pooled"]:
         x = d if s == "pooled" else d[d["season"] == s]
-        row = {"season": s}
+        row: dict[str, Any] = {"season": s}
         for anchor in spec.anchors:
             y = x[x[f"line_{anchor}"].notna()]
             row[f"n_{anchor}"] = len(y)

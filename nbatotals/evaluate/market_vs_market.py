@@ -21,6 +21,7 @@ devigged true-close probability of the bet side at the bet's line minus p_fair.
 from __future__ import annotations
 
 from statistics import NormalDist
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -297,7 +298,7 @@ def lag_table(c: pd.DataFrame, seasons=TEST_SEASONS) -> pd.DataFrame:
             continue
         pm = pin.xs(mkt, level="market")
         x, y = stack([pm[b] - pm[a] for a, b, _ in trip], [pm[n] - pm[b] for _, b, n in trip])
-        rows.append(_lag_row(mkt, "pinnacle (own momentum)", x, y, np.nan, np.nan))
+        rows.append(_lag_row(mkt, "pinnacle (own momentum)", x, y, np.nan))
         books = sorted(set(w.xs(mkt, level="market").index.get_level_values("book")) - {PINNACLE})
         for book in books:
             sm = w.xs((mkt, book), level=("market", "book"))
@@ -308,11 +309,11 @@ def lag_table(c: pd.DataFrame, seasons=TEST_SEASONS) -> pd.DataFrame:
             x, y = stack(prev, nxt)
             xs, ys = stack(same_pin, nxt)
             same = metrics.corr_ci(xs, ys)[0] if len(xs) > 3 and np.std(xs) > 0 and np.std(ys) > 0 else np.nan
-            rows.append(_lag_row(mkt, book, x, y, same, len(xs)))
+            rows.append(_lag_row(mkt, book, x, y, same))
     return pd.DataFrame(rows)
 
 
-def _lag_row(mkt, book, x, y, same, n_same):
+def _lag_row(mkt, book, x, y, same):
     if len(x) > 3 and np.std(x) > 0 and np.std(y) > 0:
         r, lo, hi, n = metrics.corr_ci(x, y)
     else:
@@ -357,11 +358,15 @@ def calibration(paired: pd.DataFrame) -> pd.DataFrame:
 
 # ---------------------------------------------------------------- run
 
+def _no_progress(_message: str) -> None:
+    return None
+
+
 def run(quotes: pd.DataFrame, games: pd.DataFrame, seasons=TEST_SEASONS, progress=None) -> dict:
     """Everything the report needs. `games` needs id, season, status, postseason, home_pts, away_pts."""
-    log = progress or (lambda msg: None)
+    log = progress or _no_progress
     g = games[(games["status"] == "final") & (games["postseason"] == 0)]
-    res = {"input_rows": len(quotes)}
+    res: dict[str, Any] = {"input_rows": len(quotes)}
     q = quotes[quotes["game_id"].isin(g["id"])]
     res["rows_not_scored_game"] = len(quotes) - len(q)
     c, drops = clean(q)

@@ -104,7 +104,7 @@ class History:
             if n:
                 raw = cur.rates(lo, hi)
         k = float(lp["shrinkage_team_games"])
-        out = {"n": n}
+        out: dict[str, float] = {"n": n}
         for stat in ("pace", "ortg"):
             out[stat] = base[stat] if raw is None else (n * raw[stat] + k * base[stat]) / (n + k)
         return out
@@ -115,14 +115,12 @@ class History:
         fp = params["features"]
         arr = self.team.get((team, role))
         out: dict[str, float] = {}
-        n = 0
-        if arr is not None:
-            lo, hi = arr.before(day, season)
-            n = hi - lo
+        lo, hi = arr.before(day, season) if arr is not None else (0, 0)
+        n = hi - lo
         out["n"] = n
         windows = {}
         for name, size in WINDOWS.items():
-            if n:
+            if n and arr is not None:
                 start = lo if size is None else max(lo, hi - size)
                 windows[name] = arr.rates(start, hi)
             for stat in STATS:

@@ -1,3 +1,5 @@
+from typing import Any
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -89,8 +91,10 @@ def test_readme_example_projector_runs_and_is_point_in_time(league, prm):
 
     readme = (Path(__file__).resolve().parents[1] / "README.md").read_text()
     section = readme[readme.index("## Building on this"):]
-    code = re.search(r"```python\n(.*?)```", section, re.S).group(1)
-    ns = {}
+    match = re.search(r"```python\n(.*?)```", section, re.S)
+    assert match is not None
+    code = match.group(1)
+    ns: dict[str, Any] = {}
     exec(code, ns)
     p = ns["TeamPaceOnly"]()
     assert isinstance(p, base.Projector)

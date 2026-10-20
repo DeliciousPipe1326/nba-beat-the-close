@@ -68,7 +68,7 @@ def test_external_file_truncation(league, prm, folders, tmp_path, state):
     box_dates = box.merge(games[["id", "game_date"]], left_on="game_id", right_on="id")["game_date"]
     mismatches = []
     for i, target in enumerate(sample.itertuples(index=False)):
-        dirs = _truncate(*folders, tmp_path / str(i), target.game_date, 9_000_000 + target.id)
+        dirs = _truncate(folders[0], folders[1], tmp_path / str(i), target.game_date, 9_000_000 + target.id)
         keep_games = games[games["game_date"] < target.game_date]
         keep_box = box[(box_dates < target.game_date).to_numpy()]
         blind = pd.DataFrame([target._asdict()]).assign(home_pts=np.nan, away_pts=np.nan)
@@ -94,7 +94,7 @@ def test_external_truncation_catches_a_leaky_reference(league, prm, folders, tmp
     box_dates = box.merge(games[["id", "game_date"]], left_on="game_id", right_on="id")["game_date"]
     caught = 0
     for i, target in enumerate(sample.itertuples(index=False)):
-        dirs = _truncate(*folders, tmp_path / str(i), target.game_date, 9_000_000 + target.id)
+        dirs = _truncate(folders[0], folders[1], tmp_path / str(i), target.game_date, 9_000_000 + target.id)
         blind = pd.DataFrame([target._asdict()]).assign(home_pts=np.nan, away_pts=np.nan)
         cut = LineupPaceEff(legacy_players.player_inputs(*dirs)).predict(
             blind, games[games["game_date"] < target.game_date], box[(box_dates < target.game_date).to_numpy()],

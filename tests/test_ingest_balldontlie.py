@@ -24,7 +24,7 @@ def test_games_paginate_map_and_skip_exhibitions(con):
              "meta": {"next_cursor": 77}}
     page2 = {"data": [bdl_game(3, "2025-11-04", 2, 14, status="7:30 pm ET"), bdl_game(4, "2025-11-04", 2, 99)],
              "meta": {}}
-    waits = []
+    waits: list[float] = []
     c, s = client({"/games": [FakeResponse(page1), FakeResponse(page2)]}, waits)
     assert balldontlie.ingest_games(con, c, seasons=[2025]) == 3
     assert s.calls[1]["params"]["cursor"] == 77

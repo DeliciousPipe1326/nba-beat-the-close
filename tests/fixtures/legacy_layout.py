@@ -42,7 +42,7 @@ def _legacy_pace(rows, gid):
 
 
 def _odds_rows():
-    rows = []
+    rows: list[tuple] = []
     books = [("fanduel", -110, -110), ("draftkings", -112, -108), ("betmgm", -105, -115)]
     for gid, home_id, line in ((101, 2, 221.5), (102, 14, 230.0)):
         for anchor, hrs, shift in (("open", 18.0, -1.0), ("noon_local", 12.0, -0.5), ("close", 0.5, 0.0)):
@@ -117,7 +117,7 @@ def build_lake(root: str | Path) -> Path:
     import json
 
     root = Path(root)
-    by_file = {}
+    by_file: dict[tuple[str, str], dict[int, dict]] = {}
     for r in _odds_rows():
         _, gid, market, anchor, book, _, _, total, o, u, *_ = r
         if market != "totals":

@@ -22,7 +22,7 @@ class FakeSession:
 
     def __init__(self, routes: dict):
         self.routes = {k: list(v) if isinstance(v, list) else [v] for k, v in routes.items()}
-        self.calls = []
+        self.calls: list[dict] = []
 
     def get(self, url, params=None, headers=None, timeout=None):
         self.calls.append({"url": url, "params": dict(params or {}), "headers": dict(headers or {})})

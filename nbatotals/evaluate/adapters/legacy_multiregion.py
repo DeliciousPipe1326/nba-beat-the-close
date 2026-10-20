@@ -148,9 +148,9 @@ def read_market_files(path: str | os.PathLike | None = None, seasons: tuple[str,
     (nbatotals/evaluate/market_vs_market.py); no quote is cleaned here.
     """
     root = root_path(path)
-    cols = {k: [] for k in ("season", "market", "bucket", "polled_utc", "event_id", "commence_utc", "home_name",
-                            "away_name", "book", "book_last_update", "a_point", "b_point", "a_american",
-                            "b_american", "names_ok")}
+    names = ("season", "market", "bucket", "polled_utc", "event_id", "commence_utc", "home_name", "away_name", "book",
+             "book_last_update", "a_point", "b_point", "a_american", "b_american", "names_ok")
+    cols: dict[str, list] = {k: [] for k in names}
     season_dirs = sorted(root.glob("season=*"))
     if seasons is not None:
         season_dirs = [d for d in season_dirs if d.name.split("=", 1)[1] in seasons]

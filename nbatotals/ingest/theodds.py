@@ -134,7 +134,7 @@ def due_anchors(con: sqlite3.Connection, events: list, now: dt.datetime, offsets
     last = con.execute("SELECT MAX(called_utc) FROM api_usage WHERE provider = ? AND endpoint = 'odds'",
                        (PROVIDER,)).fetchone()[0]
     opening_ok = last is None or (now - _ts(last)).total_seconds() / 60.0 >= opening_recheck_minutes
-    have = {}
+    have: dict[str, set[str]] = {}
     for event_id, anchor in con.execute("SELECT DISTINCT event_id, anchor FROM odds_snapshots WHERE source = ?",
                                         (PROVIDER,)):
         have.setdefault(event_id, set()).add(anchor)

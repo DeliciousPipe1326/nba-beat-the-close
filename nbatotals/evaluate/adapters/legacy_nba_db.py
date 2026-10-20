@@ -29,6 +29,7 @@ import os
 import sqlite3
 import sys
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -258,7 +259,7 @@ def write_store(frames: dict[str, pd.DataFrame], out: str | os.PathLike) -> Path
     return out
 
 
-def verify(frames: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame | dict]:
+def verify(frames: dict[str, pd.DataFrame]) -> dict[str, Any]:
     games, box, odds = frames["games"], frames["team_box"], frames["odds_raw"]
     final = games[games["status"] == "final"]
 

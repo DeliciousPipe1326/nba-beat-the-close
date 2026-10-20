@@ -121,6 +121,7 @@ def cmd_backtest_books(args) -> int:
         print(f"\n## {mkt}: top of the per-book table (2%, buckets pooled, exact lines)\n")
         print(mvm.pooled_table(res["pooled"]["exact"], mkt, top=8))
     print(f"\nfull report: {out}")
+    return 0
 def cmd_backtest_props(args) -> int:
     from nbatotals.evaluate import props_market as pm
     from nbatotals.evaluate.adapters import legacy_multiregion, legacy_nba_db, legacy_props

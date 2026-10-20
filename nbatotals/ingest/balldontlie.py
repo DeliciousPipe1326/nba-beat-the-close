@@ -41,7 +41,7 @@ class Client:
         self.gap = float(cfg["min_seconds_between_requests"])
         self.per_page = int(cfg["per_page"])
         self.sleep = sleep
-        self._last = None
+        self._last: float | None = None
 
     def pages(self, path: str, params: dict):
         """Yield every row across cursor pages."""
@@ -190,7 +190,8 @@ def ingest_injuries(con: sqlite3.Connection, client: Client, *, observed=None) -
     n = 0
     for r in client.pages("player_injuries", {}):
         p = r.get("player") or {}
-        team = BDL_ID_TO_ALIAS.get(p.get("team_id"))
+        team_id = p.get("team_id")
+        team = BDL_ID_TO_ALIAS.get(team_id) if team_id is not None else None
         con.execute(
             "INSERT OR REPLACE INTO injuries (observed_utc, player_id, team, player_name, status, description, "
             "return_date, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
