@@ -220,6 +220,25 @@ To refresh results and box scores each morning, run `ingest-games --date
 <yesterday>` and `ingest-box --date <yesterday>`. The local store is
 `data/nbatotals.db`; its schema is in [docs/schema.md](docs/schema.md).
 
+## Try it in one minute
+
+No keys, no downloads:
+
+```bash
+pip install -e .
+```
+
+```bash
+python -m nbatotals demo
+```
+
+Then open `out/demo_report.html`. The demo builds a small store under
+`data/demo/` from a **made-up league with made-up odds** (`nbatotals/synthetic.py`)
+and runs the same `today` and `report` code the real pipeline uses. It shows
+what the output looks like, nothing more: its teams, scores and lines are not
+real. Real projections need your own API keys and the steps in Quick start;
+`python -m nbatotals report` then renders the day's CSV in the same layout.
+
 ## Every knob in `config/params.yaml`
 
 Fitted means the backtest re-chose it per season from earlier seasons only.
@@ -326,6 +345,7 @@ every anchor from the raw payloads' own timestamps rather than trusting labels.
 | `nbatotals/experiments/`, `nbatotals/features/players.py` | Experiment 2: input gate, report, player inputs for `lineup_pace_eff` |
 | `docs/` | Pre-registration, results, full backtest reports, schema, features; `docs/experiments/` for later pre-registered experiments |
 | `tests/` | Offline tests on synthetic data, including the leakage self-test |
+| `nbatotals/demo.py`, `nbatotals/report.py`, `nbatotals/synthetic.py` | The offline demo, the HTML report and the made-up league both use |
 | `scripts/check.sh` | Lint, types, complexity budget and tests in one command ([docs/CODE_QUALITY.md](docs/CODE_QUALITY.md)) |
 
 ## Licence and data

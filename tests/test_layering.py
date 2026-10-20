@@ -1,7 +1,7 @@
 """The layering rule (docs/CODE_QUALITY.md): nothing lower imports anything higher.
 
-    foundations (teams, boxscore, params, cache) -> ingest -> store/data -> features -> model
-    -> evaluate -> experiments -> today/cli
+    foundations (teams, boxscore, params, cache, synthetic) -> ingest -> store/data -> features -> model
+    -> evaluate -> experiments -> today/report/demo/cli
 
 A module may import its own layer or any lower one. Experiments sit beside the
 evaluator: they may import it, it may not import them.
@@ -14,13 +14,14 @@ PKG = Path(__file__).resolve().parents[1] / "nbatotals"
 
 RANK = {
     "nbatotals": 0, "nbatotals.teams": 0, "nbatotals.boxscore": 0, "nbatotals.params": 0, "nbatotals.cache": 0,
+    "nbatotals.synthetic": 0,
     "nbatotals.ingest": 1,
     "nbatotals.store": 2, "nbatotals.data": 2,
     "nbatotals.features": 3,
     "nbatotals.model": 4,
     "nbatotals.evaluate": 5,
     "nbatotals.experiments": 6,
-    "nbatotals.today": 7, "nbatotals.cli": 7, "nbatotals.__main__": 7,
+    "nbatotals.today": 7, "nbatotals.report": 7, "nbatotals.demo": 7, "nbatotals.cli": 7, "nbatotals.__main__": 7,
 }
 
 

@@ -87,5 +87,6 @@ merges), after at the commit that adds this file. Same tool versions: ruff
 The two maintainability grades did not improve. The index penalises module
 size, and splitting long functions into named steps added lines. Both modules
 are an experiment's whole harness plus its report. Moving each report's
-section builders into a module of its own would lift both to A without
-changing behaviour, and is the next step if the grade matters.
+section builders into a module of their own would shrink both modules without
+changing behaviour, and is the next step if the grade matters. Its effect on
+the index has not been measured.

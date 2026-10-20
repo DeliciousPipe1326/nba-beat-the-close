@@ -50,6 +50,11 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--out", default=None, help="CSV path, default out/today_<date>.csv (git-ignored)")
     t.add_argument("--model", default=None,
                    help="registered projector (default pace_eff); see nbatotals/model/registry.py")
+    sub.add_parser("demo", help="the whole pipeline offline on a made-up league: out/demo_today.csv and "
+                                "out/demo_report.html (no keys needed)")
+    r = sub.add_parser("report", help="render a today CSV as one self-contained HTML page")
+    r.add_argument("--csv", default=None, help="CSV from `today` (default out/today_<today>.csv)")
+    r.add_argument("--out", default=None, help="HTML path (default out/report_<date>.html, git-ignored)")
     sub.add_parser("verify-legacy", help="read $NBA_LEGACY_DB and print row-count checks")
     bt = sub.add_parser("backtest", help="walk-forward backtest (docs/RESULTS.md)")
     bt.add_argument("--legacy", action="store_true", required=True,
@@ -318,18 +323,42 @@ def cmd_store(args) -> int:
     return 0
 
 
+def cmd_demo(args) -> int:
+    from nbatotals import demo
+
+    res = demo.run()
+    print(demo.HEADER)
+    print(res["table"].to_string(index=False))
+    print(f"\nstore: {res['store']}\ncsv:   {res['csv']}\nhtml:  {res['html']}")
+    return 0
+
+
+def cmd_report(args) -> int:
+    from nbatotals import report
+
+    date = _today_eastern()
+    csv = Path(args.csv or ROOT / "out" / f"today_{date}.csv")
+    if not csv.exists():
+        print(f"{csv} not found: run `python -m nbatotals today` first (or pass --csv)", file=sys.stderr)
+        return 2
+    out = Path(args.out or ROOT / "out" / f"report_{csv.stem.removeprefix('today_')}.html")
+    print(f"written: {report.write(csv, out)}")
+    return 0
+
+
+def cmd_verify_legacy(args) -> int:
+    from nbatotals.evaluate.adapters import legacy_nba_db
+
+    return legacy_nba_db.main([])
+
+
+STORE_COMMANDS = ("init", "ingest-games", "ingest-box", "ingest-injuries", "poll-odds", "today")
+COMMANDS = {"verify-legacy": cmd_verify_legacy, "backtest": cmd_backtest, "backtest-books": cmd_backtest_books,
+            "backtest-props": cmd_backtest_props, "demo": cmd_demo, "report": cmd_report}
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.command in ("init", "ingest-games", "ingest-box", "ingest-injuries", "poll-odds", "today"):
+    if args.command in STORE_COMMANDS:
         return cmd_store(args)
-    if args.command == "verify-legacy":
-        from nbatotals.evaluate.adapters import legacy_nba_db
-
-        return legacy_nba_db.main([])
-    if args.command == "backtest":
-        return cmd_backtest(args)
-    if args.command == "backtest-books":
-        return cmd_backtest_books(args)
-    if args.command == "backtest-props":
-        return cmd_backtest_props(args)
-    return 2
+    return COMMANDS[args.command](args)

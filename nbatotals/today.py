@@ -73,7 +73,7 @@ def build(con: sqlite3.Connection, date: str, params: dict, model: str | None = 
     return out[COLUMNS].sort_values(["tip_utc", "home"], na_position="last").reset_index(drop=True)
 
 
-def write_csv(df: pd.DataFrame, path) -> None:
+def write_csv(df: pd.DataFrame, path, header: str = HEADER) -> None:
     with open(path, "w") as fh:
-        fh.write(HEADER + "\n")
+        fh.write(header + "\n")
         df.to_csv(fh, index=False)
