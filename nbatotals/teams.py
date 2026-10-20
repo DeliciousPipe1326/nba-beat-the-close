@@ -1,7 +1,7 @@
 """Team identity: every table keys teams by the 3-letter alias below.
 
-Sources name teams differently (BallDontLie integer ids, The Odds API full
-names). Everything is mapped to these aliases at ingest time.
+Sources name teams differently (BallDontLie integer ids, NBA Stats ids, The
+Odds API full names). Everything is mapped to these aliases at ingest time.
 """
 
 ALIASES = (
@@ -17,6 +17,18 @@ BDL_ID_TO_ALIAS = {
     15: "MEM", 16: "MIA", 17: "MIL", 18: "MIN", 19: "NOP", 20: "NYK",
     21: "OKC", 22: "ORL", 23: "PHI", 24: "PHX", 25: "POR", 26: "SAC",
     27: "SAS", 28: "TOR", 29: "UTA", 30: "WAS",
+}
+
+# NBA Stats team ids (used by Dunks & Threes and stats.nba.com).
+NBA_STATS_ID_TO_ALIAS = {
+    1610612737: "ATL", 1610612738: "BOS", 1610612739: "CLE", 1610612740: "NOP",
+    1610612741: "CHI", 1610612742: "DAL", 1610612743: "DEN", 1610612744: "GSW",
+    1610612745: "HOU", 1610612746: "LAC", 1610612747: "LAL", 1610612748: "MIA",
+    1610612749: "MIL", 1610612750: "MIN", 1610612751: "BKN", 1610612752: "NYK",
+    1610612753: "ORL", 1610612754: "IND", 1610612755: "PHI", 1610612756: "PHX",
+    1610612757: "POR", 1610612758: "SAC", 1610612759: "SAS", 1610612760: "OKC",
+    1610612761: "TOR", 1610612762: "UTA", 1610612763: "MEM", 1610612764: "WAS",
+    1610612765: "DET", 1610612766: "CHA",
 }
 
 FULL_NAME_TO_ALIAS = {
@@ -38,6 +50,7 @@ FULL_NAME_TO_ALIAS = {
 
 assert set(BDL_ID_TO_ALIAS.values()) == set(ALIASES)
 assert set(FULL_NAME_TO_ALIAS.values()) == set(ALIASES)
+assert set(NBA_STATS_ID_TO_ALIAS.values()) == set(ALIASES)
 
 
 def alias_from_full_name(name: str) -> str:
