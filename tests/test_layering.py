@@ -1,6 +1,6 @@
 """The layering rule (docs/CODE_QUALITY.md): nothing lower imports anything higher.
 
-    foundations (teams, boxscore, params) -> ingest -> store/data -> features -> model
+    foundations (teams, boxscore, params, cache) -> ingest -> store/data -> features -> model
     -> evaluate -> experiments -> today/cli
 
 A module may import its own layer or any lower one. Experiments sit beside the
@@ -13,7 +13,7 @@ from pathlib import Path
 PKG = Path(__file__).resolve().parents[1] / "nbatotals"
 
 RANK = {
-    "nbatotals": 0, "nbatotals.teams": 0, "nbatotals.boxscore": 0, "nbatotals.params": 0,
+    "nbatotals": 0, "nbatotals.teams": 0, "nbatotals.boxscore": 0, "nbatotals.params": 0, "nbatotals.cache": 0,
     "nbatotals.ingest": 1,
     "nbatotals.store": 2, "nbatotals.data": 2,
     "nbatotals.features": 3,

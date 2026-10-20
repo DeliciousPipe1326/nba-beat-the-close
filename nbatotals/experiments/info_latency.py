@@ -7,7 +7,7 @@ a cell here equals the same cell in a `backtest --legacy --model ...` report.
 
 Needs the walk-forward fits cached by `python -m nbatotals backtest --legacy
 --model <name>` for pace_eff, elo_total, league_avg and lineup_pace_eff
-(data/fit_cache*.pkl), and the env vars listed in
+(data/cache/fit*/, parquet via nbatotals.cache), and the env vars listed in
 nbatotals/evaluate/adapters/legacy_players.py. Run:
 
     python -m nbatotals.experiments.info_latency [--out docs/experiments/info_latency/report.md]
@@ -16,13 +16,13 @@ nbatotals/evaluate/adapters/legacy_players.py. Run:
 from __future__ import annotations
 
 import argparse
-import pickle
 import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+from nbatotals import cache as caches
 from nbatotals import params as params_io
 from nbatotals.evaluate import backtest, market, metrics
 from nbatotals.evaluate.backtest import TEST_SEASONS, TRUE_CLOSE as SPEC, _table, season_label
@@ -34,19 +34,18 @@ SEASONS = list(TEST_SEASONS) + ["pooled"]
 
 
 def _cache(name: str) -> Path:
-    suffix = "" if name == "pace_eff" else f"_{name}"
-    return ROOT / "data" / f"fit_cache{suffix}.pkl"
+    return caches.fit_cache_path(ROOT / "data", name)
 
 
 def load_market(games, base) -> tuple[pd.DataFrame, pd.DataFrame]:
     from nbatotals.evaluate.adapters import legacy_multiregion
 
-    path = ROOT / "data" / "exp2_quotes.pkl"
-    if path.exists():
-        quotes = pickle.loads(path.read_bytes())
+    path = ROOT / "data" / "cache" / "exp2_quotes"
+    if caches.exists(path):
+        quotes = caches.load(path, "true_close_quotes")[0]["quotes"]
     else:
         quotes, _ = legacy_multiregion.anchor_quotes(legacy_multiregion.read_files(), games)
-        path.write_bytes(pickle.dumps(quotes))
+        caches.save(path, "true_close_quotes", {"quotes": quotes})
     cons = market.consensus(quotes, base)
     cons, _ = market.enforce_anchor_order(cons, SPEC.ref)
     return quotes, market.wide(cons)
@@ -251,21 +250,21 @@ def run(out: Path) -> dict:
     quotes, w = load_market(games, base)
     fitted = {}
     for name in MODELS:
-        if not _cache(name).exists():
+        if not caches.exists(_cache(name)):
             raise FileNotFoundError(f"{_cache(name)}: run `python -m nbatotals backtest --legacy --model {name}` first")
-        fitted[name] = pickle.loads(_cache(name).read_bytes())
+        fitted[name] = caches.load_fit(_cache(name))
     preds = {n: f[0] for n, f in fitted.items()}
 
     # placebo: same projector, DnT minutes replaced by previous-game actual minutes
     d, m = player_minutes(games)
-    pcache = ROOT / "data" / f"fit_cache_{PLACEBO}.pkl"
+    pcache = _cache(PLACEBO)
     inputs = legacy_players.player_inputs_from_env()
     pin_inputs, replaced = placebo_inputs(inputs, d, m)
-    if pcache.exists():
-        fitted[PLACEBO] = pickle.loads(pcache.read_bytes())
+    if caches.exists(pcache):
+        fitted[PLACEBO] = caches.load_fit(pcache)
     else:
         fitted[PLACEBO] = backtest.predictions(games, box, base, projector=LineupPaceEff(pin_inputs))
-        pcache.write_bytes(pickle.dumps(fitted[PLACEBO]))
+        caches.save_fit(pcache, fitted[PLACEBO])
     preds[PLACEBO] = fitted[PLACEBO][0]
 
     c = {n: cells(p, w) for n, p in preds.items()}

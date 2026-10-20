@@ -23,6 +23,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from nbatotals import store
 from nbatotals.evaluate.adapters import legacy_nba_db
 
 ENV_PROPS = "NBA_LEGACY_PROPS"
@@ -84,7 +85,7 @@ def read_player_box(props_db=None, nba_db=None, seasons=(2024,)) -> pd.DataFrame
         q = f"""SELECT l.game_id, l.player_id, p.full_name AS name, l.team_abbreviation AS team, l.season,
                        l.game_date, l.minutes_decimal AS minutes, l.is_dnp, l.points, l.rebounds, l.assists
                 FROM player_game_logs l LEFT JOIN n.balldontlie_players p ON p.player_id = l.player_id
-                WHERE l.season IN ({",".join("?" * len(seasons))})"""
+                WHERE l.season IN ({store.placeholders(len(seasons))})"""  # nosec B608: only '?' placeholders
         return pd.read_sql_query(q, con, params=list(seasons))
     finally:
         con.close()

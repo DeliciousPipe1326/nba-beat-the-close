@@ -21,3 +21,14 @@ def test_market_is_constrained_and_game_id_may_wait(tmp_path):
             "insert into odds_snapshots (event_id, book, market, anchor, source) "
             "values ('e1', 'b', 'props', 'close', 't')"
         )
+
+
+def test_placeholders_bind_every_value(tmp_path):
+    con = store.connect(tmp_path / "s.db")
+    con.executemany("insert into games (id, game_date, season, home, away, status, source) "
+                    "values (?, '2024-01-01', 2023, 'BOS', 'NYK', 'final', 't')", [(i,) for i in (1, 2, 3)])
+    ids = [1, 3]
+    rows = con.execute(f"select id from games where id in ({store.placeholders(len(ids))}) order by id", ids)
+    assert [r[0] for r in rows] == [1, 3]
+    with pytest.raises(ValueError):
+        store.placeholders(0)

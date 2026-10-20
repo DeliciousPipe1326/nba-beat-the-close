@@ -12,7 +12,7 @@ import sqlite3
 
 import pandas as pd
 
-from nbatotals import data
+from nbatotals import data, store
 from nbatotals.evaluate import market
 from nbatotals.features.pointintime import build_features
 from nbatotals.model import base as model_base
@@ -49,9 +49,10 @@ def build(con: sqlite3.Connection, date: str, params: dict, model: str | None = 
         proj, left_on="id", right_on="game_id").merge(
         feats[["game_id", "home_n", "away_n"]], on="game_id")
     anchor = params["today"]["market_anchor"]
-    odds = pd.read_sql_query(
-        "SELECT * FROM odds_snapshots WHERE market = 'totals' AND anchor = ? AND game_id IN "
-        f"({', '.join('?' * len(out))})", con, params=[anchor, *out["game_id"].astype(int).tolist()])
+    ids = out["game_id"].astype(int).tolist()
+    sql = ("SELECT * FROM odds_snapshots WHERE market = 'totals' AND anchor = ? "
+           f"AND game_id IN ({store.placeholders(len(ids))})")  # nosec B608: only '?' placeholders interpolated
+    odds = pd.read_sql_query(sql, con, params=[anchor, *ids])
     if not odds.empty:
         cons = market.consensus(odds, params)
         lead = odds.groupby("game_id")["lead_minutes"].min().rename("market_lead_minutes")

@@ -86,8 +86,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def cmd_backtest_books(args) -> int:
-    import pickle
-
+    from nbatotals import cache as caches
     from nbatotals.evaluate import market_vs_market as mvm
     from nbatotals.evaluate.adapters import legacy_lake, legacy_multiregion, legacy_nba_db
 
@@ -102,15 +101,14 @@ def cmd_backtest_books(args) -> int:
         if old is not None:
             os.environ[legacy_lake.ENV_VAR] = old
     seasons = mvm.DESCRIPTIVE_SEASONS + mvm.TEST_SEASONS
-    cache = ROOT / "data" / "book_lag_raw.pkl"
-    if args.reuse_quotes and cache.exists():
-        raw = pickle.loads(cache.read_bytes())
+    cache = ROOT / "data" / "cache" / "book_lag_raw"
+    if args.reuse_quotes and caches.exists(cache):
+        raw = caches.load(cache, "book_lag_raw")[0]["raw"]
         print(f"reusing parsed payloads from {cache}", file=sys.stderr)
     else:
         print("reading payloads ...", file=sys.stderr)
         raw = legacy_multiregion.read_market_files(seasons=seasons)
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        cache.write_bytes(pickle.dumps(raw))
+        caches.save(cache, "book_lag_raw", {"raw": raw})
     quotes, counts = legacy_multiregion.market_quotes(raw, games)
     res = mvm.run(quotes, games, progress=lambda m: print(m, file=sys.stderr))
     md = mvm.report_markdown(res)
@@ -170,7 +168,7 @@ def cmd_backtest(args) -> int:
         print(f"{source.ENV_VAR} is required: the market anchors are rebuilt from the raw payloads by measured "
               "capture time, never taken from the legacy odds table (see docs/RESULTS.md).", file=sys.stderr)
         return 2
-    import pickle
+    from nbatotals import cache as caches
 
     # Games and box scores from the legacy DB (without its odds-lake stamping);
     # market anchors rebuilt from raw payloads (pre-registration Amendments 1 and 2).
@@ -201,17 +199,16 @@ def cmd_backtest(args) -> int:
         out_path = args.out or str(ROOT / "docs" / f"backtest_legacy_temporal_report{suffix}.md")
     log_path = args.log or str(ROOT / "docs" / "search" / f"fit_log{suffix}.tsv.gz")
     base = params_io.load(args.params)
-    cache = ROOT / "data" / f"fit_cache{suffix}.pkl"
+    cache = caches.fit_cache_path(ROOT / "data", projector.name, registry.DEFAULT)
     fitted = None
-    if args.reuse_fit and cache.exists():
-        fitted = pickle.loads(cache.read_bytes())
+    if args.reuse_fit and caches.exists(cache):
+        fitted = caches.load_fit(cache)
         print(f"reusing walk-forward fit from {cache}", file=sys.stderr)
     res = backtest.run(games, box, quotes, base, spec=spec, fitted=fitted, projector=projector,
                        progress=lambda i, n: print(f"\rgrid: blend point {i}/{n}", end="", file=sys.stderr),
                        log_path=log_path)
     print(file=sys.stderr)
-    cache.parent.mkdir(parents=True, exist_ok=True)
-    cache.write_bytes(pickle.dumps(res["fitted"]))
+    caches.save_fit(cache, res["fitted"])
     res["anchor_counts"] = counts
     md = backtest.report_markdown(res)
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
@@ -226,8 +223,7 @@ def cmd_backtest(args) -> int:
 
 def _backtest_sides(args, games, box, projector) -> int:
     """Experiment 5: spreads or moneyline against the true close (pre-registered first)."""
-    import pickle
-
+    from nbatotals import cache as caches
     from nbatotals import params as params_io
     from nbatotals.evaluate import market, sides
     from nbatotals.evaluate.adapters import legacy_multiregion as mr
@@ -247,17 +243,17 @@ def _backtest_sides(args, games, box, projector) -> int:
         out_path.write_text(sides.stopped_report(args.market_type, projector.name, sane, sides.SPREADS.labels))
         print(f"grading stopped: a sanity stop rule failed; see {out_path}", file=sys.stderr)
         return 3
-    cache = ROOT / "data" / f"margin_fit_{projector.name}.pkl"
-    if args.reuse_fit and cache.exists():
-        pred, fits = pickle.loads(cache.read_bytes())
+    cache = ROOT / "data" / "cache" / f"margin_fit_{projector.name}"
+    if args.reuse_fit and caches.exists(cache):
+        frames, _ = caches.load(cache, "margin_fit")
+        pred, fits = frames["pred"], frames["fits"]
         print(f"reusing walk-forward margin fit from {cache}", file=sys.stderr)
     else:
         pred, fits = sides.margin_predictions(
             games, box, base, projector,
             progress=lambda i, n: print(f"\rgrid: blend point {i}/{n}", end="", file=sys.stderr))
         print(file=sys.stderr)
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        cache.write_bytes(pickle.dumps((pred, fits)))
+        caches.save(cache, "margin_fit", {"pred": pred, "fits": fits})
     run = sides.run_spreads if args.market_type == "spreads" else sides.run_h2h
     res = run(pred, fits, quotes[args.market_type], games, base, sane)
     res["projector"], res["anchor_counts"] = projector.name, counts[args.market_type]

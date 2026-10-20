@@ -101,6 +101,14 @@ CREATE TABLE IF NOT EXISTS api_usage (
 """
 
 
+def placeholders(n: int) -> str:
+    """`?, ?, ...` for an SQL IN list of n bound values. The only text ever interpolated into a query string:
+    every value still goes through the driver's parameter binding."""
+    if n < 1:
+        raise ValueError("an IN list needs at least one value")
+    return ", ".join("?" * n)
+
+
 def connect(path: str | Path = DEFAULT_DB) -> sqlite3.Connection:
     path = Path(path)
     if str(path) != ":memory:":
