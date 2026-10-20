@@ -68,3 +68,71 @@ def prob_over_at(line_at: np.ndarray, close_line: np.ndarray, close_p_over: np.n
     mu = close_line + sd * inv(close_p_over)
     cdf = np.vectorize(_N.cdf)
     return 1.0 - cdf((line_at - mu) / sd)
+
+
+# --------------------------------------------------------------------------- probabilities (Experiment 5)
+
+MARGIN_SD = 12.0  # pre-registered SD of margin error around the close (Experiment 5); only for spread CLV in cents
+EPS = 1e-12
+
+
+def logit(p):
+    p = np.clip(np.asarray(p, dtype=float), EPS, 1 - EPS)
+    return np.log(p / (1 - p))
+
+
+def brier(p, y) -> np.ndarray:
+    """Per-game Brier score (p − y)²."""
+    return (np.asarray(p, float) - np.asarray(y, float)) ** 2
+
+
+def log_loss(p, y) -> np.ndarray:
+    """Per-game log loss −[y·ln p + (1 − y)·ln(1 − p)]."""
+    p = np.clip(np.asarray(p, dtype=float), EPS, 1 - EPS)
+    y = np.asarray(y, float)
+    return -(y * np.log(p) + (1 - y) * np.log(1 - p))
+
+
+def fit_logistic_scale(margin, y, lo: float = 1.0, hi: float = 60.0) -> float:
+    """Scale s maximising the likelihood of y under p = 1 / (1 + exp(−margin / s)), searched on [lo, hi]
+    (golden section; the log likelihood is unimodal in 1/s)."""
+    margin, y = np.asarray(margin, float), np.asarray(y, float)
+    nll = lambda s: log_loss(1 / (1 + np.exp(-margin / s)), y).sum()
+    g = (np.sqrt(5) - 1) / 2
+    a, b = lo, hi
+    c, d = b - g * (b - a), a + g * (b - a)
+    fc, fd = nll(c), nll(d)
+    for _ in range(200):
+        if fc < fd:
+            b, d, fd = d, c, fc
+            c = b - g * (b - a)
+            fc = nll(c)
+        else:
+            a, c, fc = c, d, fd
+            d = a + g * (b - a)
+            fd = nll(d)
+        if b - a < 1e-9:
+            break
+    return float((a + b) / 2)
+
+
+def logistic_regression(y, X: dict, max_iter: int = 100) -> dict:
+    """Maximum-likelihood logistic regression of y on an intercept plus the named columns
+    (Newton–Raphson); Wald 95% intervals from the observed information."""
+    names = ["const"] + list(X)
+    A = np.column_stack([np.ones(len(y))] + [np.asarray(v, dtype=float) for v in X.values()])
+    y = np.asarray(y, dtype=float)
+    beta = np.zeros(A.shape[1])
+    for _ in range(max_iter):
+        p = 1 / (1 + np.exp(-(A @ beta)))
+        W = p * (1 - p)
+        H = A.T @ (A * W[:, None])
+        step = np.linalg.solve(H, A.T @ (y - p))
+        beta = beta + step
+        if np.max(np.abs(step)) < 1e-10:
+            break
+    p = 1 / (1 + np.exp(-(A @ beta)))
+    cov = np.linalg.inv(A.T @ (A * (p * (1 - p))[:, None]))
+    se = np.sqrt(np.diag(cov))
+    return {n: {"coef": float(b), "lo": float(b - Z95 * s), "hi": float(b + Z95 * s), "se": float(s)}
+            for n, b, s in zip(names, beta, se)} | {"n": len(y), "log_loss": float(log_loss(p, y).mean())}

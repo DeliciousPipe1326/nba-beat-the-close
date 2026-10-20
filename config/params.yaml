@@ -130,3 +130,9 @@ models:
     season_carry: 0.5       # ratings are multiplied by this at each new season
     league_prior_games: 100 # games of weight on the base league total early in a season
     fallback_total: 222.0   # base league total when no earlier season is available
+    # Margin version for spreads/moneyline (Experiment 5, pre-registered in
+    # docs/experiments/other_markets/PREREGISTRATION.md): separate ratings on the
+    # home margin; the totals settings above are untouched.
+    margin_k: 0.1                         # untuned default
+    margin_k_grid: [0.02, 0.05, 0.1, 0.2] # declared grid; fit_margin picks the lowest margin RMSE on earlier seasons
+    fallback_margin: 2.0                  # base league home margin when no earlier season is available
