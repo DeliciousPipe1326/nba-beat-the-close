@@ -19,6 +19,21 @@ Rules the harness relies on:
   read the target's own score. The truncation test in tests/test_leakage.py
   checks this for every registered projector. `state=None` means "untuned":
   use the values in params.yaml.
+
+Optional, for spreads and moneyline (Experiment 5,
+docs/experiments/other_markets/PREREGISTRATION.md); the totals harness never
+calls them:
+
+- `predict_margin(targets, games, box, state, params)` returns columns
+  `game_id` and `margin_proj` (projected home points minus away points), under
+  the same point-in-time rule as `predict`.
+- `fit_margin(train_games, train_box, params, state)` may tune margin-only
+  settings on earlier seasons; its dict is merged over `state`. Without it,
+  `predict_margin` receives the totals `fit` state.
+
+The harness turns a margin into a win probability itself (a home-court
+constant and a logistic scale, both fitted on earlier seasons), so a projector
+does not provide one.
 """
 
 from __future__ import annotations
@@ -49,3 +64,14 @@ def check_output(out: pd.DataFrame, targets: pd.DataFrame) -> pd.DataFrame:
     if not pd.api.types.is_numeric_dtype(out["total_proj"]) or out["total_proj"].isna().any():
         raise ValueError("predict() returned a missing or non-numeric total_proj")
     return out[["game_id", "total_proj"]]
+
+
+def check_margin_output(out: pd.DataFrame, targets: pd.DataFrame) -> pd.DataFrame:
+    """Validate a predict_margin() result: one finite margin per target game."""
+    if list(out.columns[:2]) != ["game_id", "margin_proj"]:
+        raise ValueError("predict_margin() must return columns game_id, margin_proj")
+    if set(out["game_id"]) != set(targets["id"]) or out["game_id"].duplicated().any():
+        raise ValueError("predict_margin() must return exactly one row per target game")
+    if not pd.api.types.is_numeric_dtype(out["margin_proj"]) or out["margin_proj"].isna().any():
+        raise ValueError("predict_margin() returned a missing or non-numeric margin_proj")
+    return out[["game_id", "margin_proj"]]

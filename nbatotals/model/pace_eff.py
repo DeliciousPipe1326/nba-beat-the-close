@@ -42,6 +42,13 @@ class PaceEff:
         prm = params if state is None else fit.params_for(params, state["row"])
         return project(build_features(targets, games, box, prm), prm)[["game_id", "total_proj"]]
 
+    def predict_margin(self, targets, games, box, state, params) -> pd.DataFrame:
+        """Home margin = home_pts_proj - away_pts_proj from the same formula (no home-court
+        term: home_court_total enters the total only). Experiment 5."""
+        prm = params if state is None else fit.params_for(params, state["row"])
+        p = project(build_features(targets, games, box, prm), prm)
+        return pd.DataFrame({"game_id": p["game_id"], "margin_proj": p["home_pts_proj"] - p["away_pts_proj"]})
+
     @staticmethod
     def combine_logs(logs: list[pd.DataFrame]) -> pd.DataFrame:
         """Grid order across test seasons, as the log was first written."""

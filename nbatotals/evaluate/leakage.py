@@ -83,17 +83,20 @@ def truncation_check(games: pd.DataFrame, box: pd.DataFrame, params: dict, sampl
 
 
 def projector_truncation_check(projector, games: pd.DataFrame, box: pd.DataFrame, params: dict,
-                               sample: pd.DataFrame, state=None) -> dict:
+                               sample: pd.DataFrame, state=None, method: str = "predict",
+                               column: str = "total_proj") -> dict:
     """The truncation test for any projector: each sampled game's projection from
-    history cut at its date (own score blanked) must equal the full-history one."""
-    full = projector.predict(sample, games, box, state, params).set_index("game_id")["total_proj"]
+    history cut at its date (own score blanked) must equal the full-history one.
+    `method`/`column` = "predict_margin"/"margin_proj" tests the margin projection."""
+    predict = getattr(projector, method)
+    full = predict(sample, games, box, state, params).set_index("game_id")[column]
     box_dates = box.merge(games[["id", "game_date"]], left_on="game_id", right_on="id")["game_date"]
     mismatches = []
     for target in sample.itertuples(index=False):
         keep_games = games[games["game_date"] < target.game_date]
         keep_box = box[(box_dates < target.game_date).to_numpy()]
         blind = pd.DataFrame([target._asdict()]).assign(home_pts=np.nan, away_pts=np.nan)
-        cut = projector.predict(blind, keep_games, keep_box, state, params).set_index("game_id")["total_proj"]
+        cut = predict(blind, keep_games, keep_box, state, params).set_index("game_id")[column]
         if not _same(full.loc[target.id], cut.loc[target.id]):
             mismatches.append((target.id, full.loc[target.id], cut.loc[target.id]))
     return {"games": len(sample), "mismatches": mismatches}

@@ -48,6 +48,58 @@ def consensus(odds: pd.DataFrame, params: dict) -> pd.DataFrame:
     return out
 
 
+def consensus_spreads(odds: pd.DataFrame, params: dict) -> pd.DataFrame:
+    """Spreads consensus (Experiment 5 pre-registration), same rules as totals.
+
+    Input rows: market "spreads", `line` = the book's home spread, `home_price`,
+    `away_price`. Per game and anchor: drop a book whose home spread is more than
+    `outlier_points` from the median; consensus home spread = median; each book
+    devigged multiplicatively, p_home = (1/h) / (1/h + 1/a), consensus = mean;
+    real price per side = median; at least `min_books` books.
+
+    Returned with the totals column names so the totals grading code applies
+    unchanged, with home in the role of over: `line` = the home margin the
+    market implies (minus the home spread), `p_over` = p_home_cover,
+    `over_price`/`under_price` = home/away. `home_spread` is kept as well.
+    """
+    m = params["market"]
+    t = odds[(odds["market"] == "spreads") & odds["home_price"].notna() & odds["away_price"].notna()
+             & odds["line"].notna()].copy()
+    t["raw_median"] = t.groupby(["game_id", "anchor"])["line"].transform("median")
+    t = t[(t["line"] - t["raw_median"]).abs() <= m["outlier_points"]]
+    return _sides(t, m["min_books"], with_line=True)
+
+
+def consensus_h2h(odds: pd.DataFrame, params: dict) -> pd.DataFrame:
+    """Moneyline consensus (Experiment 5 pre-registration): each book devigged
+    multiplicatively, consensus p_home = mean; real price per side = median; at
+    least `min_books` books. No line, so no outlier rule. Columns as in
+    `consensus_spreads` (`p_over` = p_home, `line` NaN)."""
+    t = odds[(odds["market"] == "h2h") & odds["home_price"].notna() & odds["away_price"].notna()].copy()
+    return _sides(t, params["market"]["min_books"], with_line=False)
+
+
+def _sides(t: pd.DataFrame, min_books: int, with_line: bool) -> pd.DataFrame:
+    inv_h, inv_a = 1.0 / t["home_price"], 1.0 / t["away_price"]
+    t["p_home"] = inv_h / (inv_h + inv_a)
+    extra = {}
+    if "captured_utc" in t:
+        extra["captured_utc"] = ("captured_utc", "max")
+    if with_line:
+        extra["home_spread"] = ("line", "median")
+    out = t.groupby(["game_id", "anchor"]).agg(
+        **extra,
+        books=("book", "nunique"),
+        p_over=("p_home", "mean"),
+        over_price=("home_price", "median"),
+        under_price=("away_price", "median"),
+    ).reset_index()
+    out = out[out["books"] >= min_books].reset_index(drop=True)
+    out["line"] = -out["home_spread"] if with_line else np.nan
+    out["p_under"] = 1.0 - out["p_over"]
+    return out
+
+
 def wide(cons: pd.DataFrame) -> pd.DataFrame:
     """One row per game with columns like line_close, p_over_open, ..."""
     w = cons.pivot(index="game_id", columns="anchor",

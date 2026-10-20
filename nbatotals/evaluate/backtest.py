@@ -29,6 +29,7 @@ class MarketSpec:
     pretip: str
     headline_clv: tuple = ()
     labels: dict = field(default_factory=dict)
+    clv_sd: float = metrics.TOTAL_SD  # SD of the normal approximation behind CLV in cents
 
 
 # Pre-registration Amendment 2: multi-region payloads with a true close.
@@ -148,7 +149,7 @@ def _bets(pred: pd.DataFrame, w: pd.DataFrame, anchor: str, proj_col: str, spec:
         if has_close.any():
             p_over_close_at[has_close.to_numpy()] = metrics.prob_over_at(
                 line[has_close].to_numpy(), ref_line[has_close].to_numpy(),
-                d.loc[has_close, f"p_over_{spec.ref}"].to_numpy(dtype=float))
+                d.loc[has_close, f"p_over_{spec.ref}"].to_numpy(dtype=float), sd=spec.clv_sd)
         p_close_side = np.where(d["over"], p_over_close_at, 1 - p_over_close_at)
         d["clv_cents"] = 100 * (p_close_side - d["p_side"])
     return d

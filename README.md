@@ -40,6 +40,16 @@ prices. Testing whether an opening-line strategy works needs a live, unseen
 season (2025-26 onwards, collected with the ingesters here) and its own
 pre-registration.
 
+**Spreads and moneyline: the same answer.** The same ratings were run through the
+same harness on the other two markets, under their own pre-registration
+([docs/experiments/other_markets/](docs/experiments/other_markets/RESULTS.md)).
+Against the true-close spread, pace_eff covers 50.3% (95% Wilson 48.7–51.9%) and a
+margin Elo 49.4% (47.8–51.1%), both losing about the vig. On the moneyline both
+models' probabilities have a worse log loss than the market's in every season,
+and they get no weight once the market is known. The evidence bar was not met in
+either market. Run them with `python -m nbatotals backtest --legacy
+--market-type spreads` (or `h2h`).
+
 **How many bets it takes to prove an edge.** Totals are noisy: the true close
 misses the final total by 17.8 points RMSE in this data. To show, at 95% confidence, that a
 true win rate clears the 52.38% break-even you need roughly

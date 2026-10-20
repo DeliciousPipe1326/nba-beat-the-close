@@ -57,6 +57,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="true-close: multi-region payloads with a T-15 min close ($NBA_LEGACY_MULTIREGION), the "
                          "pre-registered primary; temporal: the older 3-a-day payloads ($NBA_LEGACY_ODDS_LAKE), "
                          "kept as a cross-check")
+    bt.add_argument("--market-type", choices=("totals", "spreads", "h2h"), default="totals",
+                    help="totals: the pre-registered test (default); spreads or h2h: Experiment 5 "
+                         "(docs/experiments/other_markets/PREREGISTRATION.md), true close only")
     bt.add_argument("--params", default=None, help="params.yaml to use (default config/params.yaml)")
     bt.add_argument("--out", default=None, help="where to write the full report (default under docs/)")
     bt.add_argument("--model", default=None, help="registered projector (default pace_eff); see nbatotals/model/registry.py")
@@ -166,6 +169,11 @@ def cmd_backtest(args) -> int:
     from nbatotals.model import registry
 
     projector = registry.get(args.model or registry.DEFAULT)
+    if args.market_type != "totals":
+        if args.market != "true-close":
+            print("--market-type spreads/h2h is graded against the true close only", file=sys.stderr)
+            return 2
+        return _backtest_sides(args, games, box, projector)
     suffix = "" if projector.name == registry.DEFAULT else f"_{projector.name}"
     if args.market == "true-close":
         quotes, counts = legacy_multiregion.anchor_quotes(legacy_multiregion.read_files(), games)
@@ -198,6 +206,56 @@ def cmd_backtest(args) -> int:
     print(backtest.fit_table(res))
     print(f"\nfull report: {out_path}")
     return 0
+
+
+def _backtest_sides(args, games, box, projector) -> int:
+    """Experiment 5: spreads or moneyline against the true close (pre-registered first)."""
+    import pickle
+
+    from nbatotals import params as P
+    from nbatotals.evaluate import market, sides
+    from nbatotals.evaluate.adapters import legacy_multiregion as mr
+
+    base = P.load(args.params)
+    quotes, counts = {}, {}
+    for mt in ("spreads", "h2h"):
+        quotes[mt], counts[mt] = mr.side_quotes(mr.read_files(market=mt), games, mt)
+    scored = games[games["season"] <= max(sides.TEST_SEASONS)]
+    cons_sp, _ = market.enforce_anchor_order(market.consensus_spreads(quotes["spreads"], base), sides.SPREADS.ref)
+    cons_ml, _ = market.enforce_anchor_order(market.consensus_h2h(quotes["h2h"], base), sides.H2H.ref)
+    sane = sides.sanity(cons_sp, cons_ml, scored)
+    out_dir = ROOT / "docs" / "experiments" / "other_markets"
+    out_path = Path(args.out or out_dir / f"backtest_legacy_{args.market_type}_report_{projector.name}.md")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    if not sane["passed"]:
+        out_path.write_text(sides.stopped_report(args.market_type, projector.name, sane, sides.SPREADS.labels))
+        print(f"grading stopped: a sanity stop rule failed; see {out_path}", file=sys.stderr)
+        return 3
+    cache = ROOT / "data" / f"margin_fit_{projector.name}.pkl"
+    if args.reuse_fit and cache.exists():
+        pred, fits = pickle.loads(cache.read_bytes())
+        print(f"reusing walk-forward margin fit from {cache}", file=sys.stderr)
+    else:
+        pred, fits = sides.margin_predictions(
+            games, box, base, projector,
+            progress=lambda i, n: print(f"\rgrid: blend point {i}/{n}", end="", file=sys.stderr))
+        print(file=sys.stderr)
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_bytes(pickle.dumps((pred, fits)))
+    run = sides.run_spreads if args.market_type == "spreads" else sides.run_h2h
+    res = run(pred, fits, quotes[args.market_type], games, base, sane)
+    res["projector"], res["anchor_counts"] = projector.name, counts[args.market_type]
+    report = sides.spreads_report if args.market_type == "spreads" else sides.h2h_report
+    out_path.write_text(report(res))
+    print(backtest_headline(res))
+    print(f"\nfull report: {out_path}")
+    return 0
+
+
+def backtest_headline(res) -> str:
+    from nbatotals.evaluate import backtest, sides
+
+    return backtest.headline_table(res) if res["market"] == "spreads" else sides.h2h_headline(res)
 
 
 def cmd_store(args) -> int:
