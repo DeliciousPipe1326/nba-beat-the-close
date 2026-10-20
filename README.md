@@ -262,6 +262,26 @@ and report every variant you tried, not just the best one.
   seasons before (see Background). A clean confirmation needs data collected
   from now on.
 
+## The one open question
+
+Nothing in this repository beats the closing line, and the market has priced
+the box-score information these models use by about ten hours before tip.
+What the market adds between the opening line and the close is mostly who
+plays. A projection built from lineup-adjusted player ratings and each game's
+projected minutes showed more than twice the formula's closing-line value from
+the opening anchor, but every such input available to this study was a
+pre-game file of unknown capture time that evidently contained news from late
+in the game day, so the result is an upper bound, not a measurement
+(`docs/experiments/info_latency/RESULTS.md`, once that experiment is merged).
+
+Whether a morning lineup projection carries information the noon line has not
+priced can only be answered with projections and odds captured live at fixed,
+recorded times over an unseen season. The author chose not to run that test:
+the best case it supports is one or two cents of closing-line value at thin
+early lines against several cents of vig, which is not a betting proposition.
+The ingesters here store a poll time on every row, so anyone who wants the
+answer can collect it.
+
 ## Lessons for anyone using The Odds API historical data
 
 Read [RESULTS.md, Appendix B](docs/RESULTS.md#appendix-b-data-defect-in-the-legacy-odds-table-historical-note)
