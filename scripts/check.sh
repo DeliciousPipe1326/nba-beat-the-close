@@ -4,12 +4,10 @@
 set -eu
 PY=${PYTHON:-python}
 echo "== ruff"
-"$PY" -m ruff check nbatotals tests
+"$PY" -m ruff check nbatotals tests scripts
 echo "== mypy"
 "$PY" -m mypy
-echo "== radon (complexity budget: no function above C, i.e. above 15)"
-over=$("$PY" -m radon cc -n D -s nbatotals tests)
-if [ -n "$over" ]; then echo "$over"; echo "complexity budget exceeded"; exit 1; fi
-echo "ok"
+echo "== radon (complexity budget: every function 15 or below)"
+"$PY" scripts/complexity_budget.py nbatotals tests
 echo "== pytest"
 "$PY" -m pytest -q "$@"

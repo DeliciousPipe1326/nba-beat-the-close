@@ -21,31 +21,54 @@ import numpy as np
 import pandas as pd
 
 
+class _Ratings:
+    """Team ratings plus the season-to-date league mean, advanced one day at a time."""
+
+    def __init__(self, k: float, cfg: dict, margin: bool):
+        self.k, self.cfg, self.margin = k, cfg, margin
+        self.sign = -1.0 if margin else 1.0  # the away rating subtracts from a margin and adds to a total
+        self.rating: dict[str, float] = {}
+        self.season: int | None = None
+        self.prev_mean: float | None = None
+        self.cur_sum, self.cur_n = 0.0, 0
+
+    def start_day(self, season: int) -> float:
+        """Roll the season if it changed; return the league mean every game that day is measured against."""
+        if season != self.season:
+            if self.season is not None and self.cur_n:
+                self.prev_mean = self.cur_sum / self.cur_n
+            self.rating = {t: r * self.cfg["season_carry"] for t, r in self.rating.items()}
+            self.season, self.cur_sum, self.cur_n = season, 0.0, 0
+        fallback = self.cfg["fallback_margin" if self.margin else "fallback_total"]
+        base = fallback if self.prev_mean is None else self.prev_mean
+        prior = self.cfg["league_prior_games"]
+        return (self.cur_sum + prior * base) / (self.cur_n + prior)
+
+    def expect(self, league: float, home: str, away: str) -> float:
+        return league + self.rating.get(home, 0.0) + self.sign * self.rating.get(away, 0.0)
+
+    def update(self, league: float, home: str, away: str, actual: float) -> None:
+        err = actual - self.expect(league, home, away)
+        self.rating[home] = self.rating.get(home, 0.0) + self.k * err
+        self.rating[away] = self.rating.get(away, 0.0) + self.sign * self.k * err
+        self.cur_sum, self.cur_n = self.cur_sum + actual, self.cur_n + 1
+
+
 def _expected(games: pd.DataFrame, targets: pd.DataFrame, k: float, cfg: dict, margin: bool = False) -> pd.Series:
     """Expected total (or home margin) per target, using only games dated before each target's date."""
-    sign = -1.0 if margin else 1.0  # the away rating subtracts from a margin and adds to a total
     hist = games[(games["status"] == "final") & games["home_pts"].notna()]
     hist = hist.sort_values(["game_date", "id"], kind="mergesort")
     by_date = {d: g for d, g in hist.groupby("game_date")}
     tg = {d: g for d, g in targets.groupby("game_date")}
-    rating, season, prev_mean, cur_sum, cur_n, out = {}, None, None, 0.0, 0, {}
+    state = _Ratings(k, cfg, margin)
+    out = {}
     for d in sorted(set(by_date) | set(tg)):
-        day_season = int((tg[d] if d in tg else by_date[d])["season"].iloc[0])
-        if day_season != season:
-            if season is not None and cur_n:
-                prev_mean = cur_sum / cur_n
-            rating = {t: r * cfg["season_carry"] for t, r in rating.items()}
-            season, cur_sum, cur_n = day_season, 0.0, 0
-        base = cfg["fallback_margin" if margin else "fallback_total"] if prev_mean is None else prev_mean
-        league = (cur_sum + cfg["league_prior_games"] * base) / (cur_n + cfg["league_prior_games"])
+        league = state.start_day(int((tg[d] if d in tg else by_date[d])["season"].iloc[0]))
         for r in (tg[d].itertuples() if d in tg else ()):
-            out[r.id] = league + rating.get(r.home, 0.0) + sign * rating.get(r.away, 0.0)
+            out[r.id] = state.expect(league, r.home, r.away)
         for r in (by_date[d].itertuples() if d in by_date else ()):
             actual = r.home_pts - r.away_pts if margin else r.home_pts + r.away_pts
-            err = actual - (league + rating.get(r.home, 0.0) + sign * rating.get(r.away, 0.0))
-            rating[r.home] = rating.get(r.home, 0.0) + k * err
-            rating[r.away] = rating.get(r.away, 0.0) + sign * k * err
-            cur_sum, cur_n = cur_sum + actual, cur_n + 1
+            state.update(league, r.home, r.away, actual)
     return pd.Series(out)
 
 

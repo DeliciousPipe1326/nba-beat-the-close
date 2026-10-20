@@ -35,5 +35,5 @@ ignore_missing_imports = true
 check_untyped_defs = true
 # tests/ imports its fixtures as the package "tests.fixtures"; resolve modules from the repo root.
 explicit_package_bases = true
-files = ["nbatotals", "tests"]
+files = ["nbatotals", "tests", "scripts"]
 exclude = ["^\\.claude/"]

@@ -145,32 +145,47 @@ def _game1():
     ]
 
 
-def test_pair_bets_settlement_and_clv():
+def _paired_game1() -> pd.DataFrame:
     kept, _ = mvm.clean(pd.DataFrame(_game1()))
-    p = mvm.settle_frame(mvm.pair(kept, "exact"), GAMES)
+    return mvm.settle_frame(mvm.pair(kept, "exact"), GAMES)
+
+
+def test_pair_bets_one_per_market():
+    p = _paired_game1()
     assert set(zip(p["market"], p["book"], strict=True)) == {
         ("totals", "softbook"), ("h2h", "softbook"), ("spreads", "softbook")}
 
-    t = p[p["market"] == "totals"].iloc[0]
+
+def test_pair_bets_totals_settlement_and_clv():
+    t = _paired_game1().query("market == 'totals'").iloc[0]
     p_fair_over = market.devig_two_way(dec(-105), dec(-115))
-    assert t["side"] == "a" and t["p_fair"] == pytest.approx(p_fair_over)
+    assert t["side"] == "a"
+    assert t["p_fair"] == pytest.approx(p_fair_over)
     assert t["edge"] == pytest.approx(p_fair_over * 2.10 - 1)
     # actual total 221 > 220.5: over wins at +110
-    assert t["win"] == 1.0 and t["profit"] == pytest.approx(1.10)
+    assert t["win"] == 1.0
+    assert t["profit"] == pytest.approx(1.10)
     p_close_over = 1 - NormalDist(222.5, 18.0).cdf(220.5)  # close 50% at 222.5, moved to the bet's 220.5
     assert t["clv_cents"] == pytest.approx(100 * (p_close_over - p_fair_over))
     assert t["line_move"] == pytest.approx(2.0)
     assert t["edge_at_close"] == pytest.approx(p_close_over * 2.10 - 1)
 
-    h = p[p["market"] == "h2h"].iloc[0]
+
+def test_pair_bets_h2h_settlement_and_clv():
+    h = _paired_game1().query("market == 'h2h'").iloc[0]
     p_home = market.devig_two_way(dec(-150), dec(130))
-    assert h["side"] == "b" and h["p_fair"] == pytest.approx(1 - p_home)
+    assert h["side"] == "b"
+    assert h["p_fair"] == pytest.approx(1 - p_home)
     assert h["edge"] == pytest.approx((1 - p_home) * 2.5 - 1)
-    assert h["win"] == 0.0 and h["profit"] == -1.0  # home won 112-109
+    assert h["win"] == 0.0  # home won 112-109
+    assert h["profit"] == -1.0
     assert h["clv_cents"] == pytest.approx(100 * ((1 - market.devig_two_way(dec(-160), dec(140))) - (1 - p_home)))
 
-    s = p[p["market"] == "spreads"].iloc[0]
-    assert s["side"] == "a" and s["edge"] == pytest.approx(0.5 * 2.05 - 1)
+
+def test_pair_bets_spreads_settlement_and_clv():
+    s = _paired_game1().query("market == 'spreads'").iloc[0]
+    assert s["side"] == "a"
+    assert s["edge"] == pytest.approx(0.5 * 2.05 - 1)
     assert s["win"] == 1.0  # home by 3 covers -2.5
     assert s["line_move"] == pytest.approx(1.0)  # took -2.5, closed -3.5: a point better
     p_close_home = 1 - NormalDist(3.5, 13.5).cdf(2.5)

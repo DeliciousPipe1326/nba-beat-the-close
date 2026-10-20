@@ -100,56 +100,87 @@ def ingest_games(con: sqlite3.Connection, client: Client, *, dates=None, seasons
     return n
 
 
-def team_box_from_stats(stats: list[dict], games: dict[int, dict]) -> list[dict]:
-    """Sum player rows into one row per team per game; derive possessions etc."""
-    sums = defaultdict(lambda: defaultdict(float))
+TEAM_BOX_COLUMNS = ["game_id", "team", "opp", "is_home", "minutes", "pts", "fgm", "fga", "fg3m", "fg3a", "ftm", "fta",
+                    "orb", "drb", "tov", "possessions", "pace", "ortg", "drtg", "source"]
+
+
+def _sum_player_rows(stats: list[dict]) -> dict[tuple[int, str], dict[str, float]]:
+    """Player stat rows summed per (game id, team alias); rows for non-NBA teams are skipped."""
+    sums: dict[tuple[int, str], dict[str, float]] = defaultdict(lambda: defaultdict(float))
     for s in stats:
         gid, team = int(s["game"]["id"]), BDL_ID_TO_ALIAS.get(s["team"]["id"])
         if team is None:
             continue
         for ours, theirs in STAT_FIELDS.items():
             sums[(gid, team)][ours] += float(s.get(theirs) or 0)
+    return sums
+
+
+def _game_team_rows(gid: int, g: dict, h: dict, a: dict) -> list[dict]:
+    """Both team_box rows for one game from the two teams' summed counts."""
+    home = {k: int(v) for k, v in h.items()}
+    away = {k: int(v) for k, v in a.items()}
+    hb, ab = boxscore.derive(home, away, g["periods"])
+    out = []
+    for row, opp, is_home in ((hb, g["away"], 1), (ab, g["home"], 0)):
+        row.update(game_id=gid, team=g["home"] if is_home else g["away"], opp=opp, is_home=is_home,
+                   source=PROVIDER)
+        out.append(row)
+    return out
+
+
+def team_box_from_stats(stats: list[dict], games: dict[int, dict]) -> list[dict]:
+    """Sum player rows into one row per team per game; derive possessions etc."""
+    sums = _sum_player_rows(stats)
     out = []
     for gid, g in games.items():
         h, a = sums.get((gid, g["home"])), sums.get((gid, g["away"]))
-        if not h or not a:
-            continue
-        home = {k: int(v) for k, v in h.items()}
-        away = {k: int(v) for k, v in a.items()}
-        hb, ab = boxscore.derive(home, away, g["periods"])
-        for row, opp, is_home in ((hb, g["away"], 1), (ab, g["home"], 0)):
-            row.update(game_id=gid, team=g["home"] if is_home else g["away"], opp=opp, is_home=is_home,
-                       source=PROVIDER)
-            out.append(row)
+        if h and a:
+            out += _game_team_rows(gid, g, h, a)
     return out
+
+
+def _games_to_fetch(con: sqlite3.Connection, game_ids=None, dates=None, seasons=None,
+                    missing_only: bool = True) -> dict[int, dict]:
+    """Final games in the store, filtered by the optional ids, dates and seasons (and, by default, to those
+    with no team box yet)."""
+    q = "SELECT id, home, away, periods, game_date, season FROM games WHERE status = 'final'"
+    games = {r[0]: {"home": r[1], "away": r[2], "periods": r[3], "date": r[4], "season": r[5]}
+             for r in con.execute(q)}
+    tests = []
+    if game_ids:
+        ids = set(game_ids)
+        tests.append(lambda k, v: k in ids)
+    if dates:
+        wanted = set(dates)
+        tests.append(lambda k, v: v["date"] in wanted)
+    if seasons:
+        years = {int(x) for x in seasons}
+        tests.append(lambda k, v: v["season"] in years)
+    if missing_only:
+        have = {r[0] for r in con.execute("SELECT DISTINCT game_id FROM team_box")}
+        tests.append(lambda k, v: k not in have)
+    return {k: v for k, v in games.items() if all(t(k, v) for t in tests)}
+
+
+def _store_team_box(con: sqlite3.Connection, rows: list[dict]) -> int:
+    sql = (f"INSERT OR REPLACE INTO team_box ({', '.join(TEAM_BOX_COLUMNS)}) "
+           f"VALUES ({', '.join('?' * len(TEAM_BOX_COLUMNS))})")
+    for row in rows:
+        con.execute(sql, [row[c] for c in TEAM_BOX_COLUMNS])
+    return len(rows)
 
 
 def ingest_box(con: sqlite3.Connection, client: Client, *, game_ids=None, dates=None, seasons=None,
                missing_only: bool = True) -> int:
     """Fetch player stats for final games and store team box scores."""
-    q = "SELECT id, home, away, periods, game_date, season FROM games WHERE status = 'final'"
-    games = {r[0]: {"home": r[1], "away": r[2], "periods": r[3], "date": r[4], "season": r[5]}
-             for r in con.execute(q)}
-    if game_ids:
-        games = {k: v for k, v in games.items() if k in set(game_ids)}
-    if dates:
-        games = {k: v for k, v in games.items() if v["date"] in set(dates)}
-    if seasons:
-        games = {k: v for k, v in games.items() if v["season"] in {int(s) for s in seasons}}
-    if missing_only:
-        have = {r[0] for r in con.execute("SELECT DISTINCT game_id FROM team_box")}
-        games = {k: v for k, v in games.items() if k not in have}
-    cols = ["game_id", "team", "opp", "is_home", "minutes", "pts", "fgm", "fga", "fg3m", "fg3a", "ftm", "fta",
-            "orb", "drb", "tov", "possessions", "pace", "ortg", "drtg", "source"]
+    games = _games_to_fetch(con, game_ids, dates, seasons, missing_only)
     ids = sorted(games)
     n = 0
     for i in range(0, len(ids), 25):
         chunk = ids[i:i + 25]
         stats = list(client.pages("stats", {"game_ids[]": chunk}))
-        for row in team_box_from_stats(stats, {k: games[k] for k in chunk}):
-            con.execute(f"INSERT OR REPLACE INTO team_box ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
-                        [row[c] for c in cols])
-            n += 1
+        n += _store_team_box(con, team_box_from_stats(stats, {k: games[k] for k in chunk}))
         con.commit()
     return n
 

@@ -51,45 +51,75 @@ def fetch_odds(session, key: str, sport: str, regions: str, markets: str):
     return common.get_json(session, f"{BASE}/sports/{sport}/odds", params=params, provider=PROVIDER, redact=key)
 
 
+_EMPTY_QUOTE = dict(line=None, over_price=None, under_price=None, home_price=None, away_price=None)
+_NOT_A_MARKET = object()  # a market this ingester does not store
+
+
+def _totals_fields(out: dict) -> dict | None:
+    o, u = out.get("Over"), out.get("Under")
+    if not o or not u or o.get("point") is None or o.get("point") != u.get("point"):
+        return None
+    return dict(line=float(o["point"]), over_price=float(o["price"]), under_price=float(u["price"]))
+
+
+def _sides_fields(out: dict, ev: dict, market: str) -> dict | None:
+    h, a = out.get(ev["home_team"]), out.get(ev["away_team"])
+    if not h or not a:
+        return None
+    line = float(h["point"]) if market == "spreads" and h.get("point") is not None else None
+    return dict(home_price=float(h["price"]), away_price=float(a["price"]), line=line)
+
+
+def _market_fields(m: dict, ev: dict):
+    """The quote's stored fields; None for an unclean quote; _NOT_A_MARKET for an unstored market."""
+    out = {o["name"]: o for o in m.get("outcomes", [])}
+    if m["key"] == "totals":
+        return _totals_fields(out)
+    if m["key"] in ("spreads", "h2h"):
+        return _sides_fields(out, ev, m["key"])
+    return _NOT_A_MARKET
+
+
+def _event_base(ev: dict, captured: dt.datetime, skipped: dict) -> dict | None:
+    """Fields shared by every quote of a pre-tip event with known teams; None (and counted) otherwise."""
+    tip = _ts(ev["commence_time"])
+    if tip <= captured:
+        skipped["in_play_events"] += 1
+        return None
+    home, away = FULL_NAME_TO_ALIAS.get(ev["home_team"]), FULL_NAME_TO_ALIAS.get(ev["away_team"])
+    if home is None or away is None:
+        skipped["unknown_team_events"] += 1
+        return None
+    return dict(event_id=ev["id"], commence_utc=common.iso(tip), captured_utc=common.iso(captured),
+                lead_minutes=(tip - captured).total_seconds() / 60.0, home=home, away=away, source=PROVIDER)
+
+
+def _book_rows(ev: dict, b: dict, base: dict, skipped: dict) -> list[dict]:
+    if b.get("last_update") and _ts(b["last_update"]) > _ts(ev["commence_time"]):
+        skipped["book_updated_after_tip"] += 1
+        return []
+    rows = []
+    for m in b.get("markets", []):
+        fields = _market_fields(m, ev)
+        if fields is _NOT_A_MARKET:
+            continue
+        if fields is None:
+            skipped["unclean_quotes"] += 1
+            continue
+        rows.append(dict(base, book=b["key"], market=m["key"], **_EMPTY_QUOTE) | fields)
+    return rows
+
+
 def parse_odds(payload: list, captured: dt.datetime) -> tuple[list[dict], dict]:
     """One row per (event, book, market) from a /odds response. Pre-tip quotes only."""
-    rows, skipped = [], {"in_play_events": 0, "unknown_team_events": 0, "book_updated_after_tip": 0,
-                         "unclean_quotes": 0}
+    rows: list[dict] = []
+    skipped = {"in_play_events": 0, "unknown_team_events": 0, "book_updated_after_tip": 0, "unclean_quotes": 0}
     for ev in payload:
-        tip = _ts(ev["commence_time"])
-        if tip <= captured:
-            skipped["in_play_events"] += 1
+        base = _event_base(ev, captured, skipped)
+        if base is None:
             continue
-        home, away = FULL_NAME_TO_ALIAS.get(ev["home_team"]), FULL_NAME_TO_ALIAS.get(ev["away_team"])
-        if home is None or away is None:
-            skipped["unknown_team_events"] += 1
-            continue
-        base = dict(event_id=ev["id"], commence_utc=common.iso(tip), captured_utc=common.iso(captured),
-                    lead_minutes=(tip - captured).total_seconds() / 60.0, home=home, away=away, source=PROVIDER)
         for b in ev.get("bookmakers", []):
-            if b.get("last_update") and _ts(b["last_update"]) > tip:
-                skipped["book_updated_after_tip"] += 1
-                continue
-            for m in b.get("markets", []):
-                out = {o["name"]: o for o in m.get("outcomes", [])}
-                row = dict(base, book=b["key"], market=m["key"], line=None, over_price=None, under_price=None,
-                           home_price=None, away_price=None)
-                if m["key"] == "totals":
-                    o, u = out.get("Over"), out.get("Under")
-                    if not o or not u or o.get("point") is None or o.get("point") != u.get("point"):
-                        skipped["unclean_quotes"] += 1
-                        continue
-                    row.update(line=float(o["point"]), over_price=float(o["price"]), under_price=float(u["price"]))
-                elif m["key"] in ("spreads", "h2h"):
-                    h, a = out.get(ev["home_team"]), out.get(ev["away_team"])
-                    if not h or not a:
-                        skipped["unclean_quotes"] += 1
-                        continue
-                    row.update(home_price=float(h["price"]), away_price=float(a["price"]),
-                               line=float(h["point"]) if m["key"] == "spreads" and h.get("point") is not None else None)
-                else:
-                    continue
-                rows.append(row)
+            rows += _book_rows(ev, b, base, skipped)
     return rows, skipped
 
 

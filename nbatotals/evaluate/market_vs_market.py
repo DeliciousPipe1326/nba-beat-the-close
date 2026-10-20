@@ -522,8 +522,8 @@ def pooled_table(pooled: pd.DataFrame, mkt: str, threshold: float = MAIN_THRESHO
     return _table(["book"] + CELL_HEAD + ["Bonferroni ROI lower bound", "clears bar"], rows)
 
 
-def report_markdown(res: dict) -> str:
-    lines = []
+def _intro(res: dict) -> list[str]:
+    lines: list[str] = []
     w = lines.append
     seasons = ", ".join(res["seasons"])
     w("# Experiment 3 report: soft books against Pinnacle at the same poll\n")
@@ -534,7 +534,12 @@ def report_markdown(res: dict) -> str:
       "CLV = Pinnacle's devigged true-close probability of the bet side at the bet's line minus p_fair at bet time. "
       "Line move = Pinnacle's true-close line relative to the bet's line, positive favouring the bet. "
       "Edge at close = p_close × price − 1. Exchanges are gross of commission.\n")
+    return lines
 
+
+def _hygiene(res: dict) -> list[str]:
+    lines: list[str] = []
+    w = lines.append
     w("## Quote hygiene\n")
     w(f"Input quote rows (all markets, buckets, books, seasons read): {res['input_rows']:,}; "
       f"rows on games outside the scored set (not final, or postseason): {res['rows_not_scored_game']:,}; "
@@ -557,7 +562,13 @@ def report_markdown(res: dict) -> str:
     w(_table(["market", "bucket", "games with any quote", "with Pinnacle"],
              [[r.market, LABELS[r.bucket], f"{r.games:,}", f"{r.with_pinnacle:,}"] for r in pc.itertuples()]))
     w("")
+    return lines
 
+
+def _polled_after_close(res: dict) -> list[str]:
+    """Soft-book quotes polled at or after the same game's Pinnacle true close (no CLV for them)."""
+    lines: list[str] = []
+    w = lines.append
     pac = res.get("polled_after_close")
     if pac is not None and len(pac):
         w("Compared soft-book quotes (exact lines) at a betting bucket polled at or after the same game's Pinnacle "
@@ -565,7 +576,12 @@ def report_markdown(res: dict) -> str:
         w(_table(["season", "bucket", "quotes"],
                  [[r.season, LABELS[r.bucket], f"{r.quotes:,}"] for r in pac.itertuples()]))
         w("")
+    return lines
 
+
+def _evidence_bar(res: dict) -> list[str]:
+    lines: list[str] = []
+    w = lines.append
     w("## Evidence bar (2%, six buckets pooled, test seasons)\n")
     for mode in ("exact", "converted"):
         p = res["pooled"][mode]
@@ -577,7 +593,12 @@ def report_markdown(res: dict) -> str:
             w(f"- {r.market} / {_book(r.book)}: {r.bets:,} bets, ROI {_spct(r.roi)} "
               f"({_spct(r.roi_lo)} to {_spct(r.roi_hi)}), CLV {r.clv_cents:+.2f}¢, Bonferroni lower {_spct(r.bonf_lo)}")
         w("")
+    return lines
 
+
+def _per_market(res: dict) -> list[str]:
+    lines: list[str] = []
+    w = lines.append
     for mkt in MARKETS:
         w(f"## {mkt}: per book, six buckets pooled, 2% (exact lines)\n")
         w(pooled_table(res["pooled"]["exact"], mkt))
@@ -605,13 +626,23 @@ def report_markdown(res: dict) -> str:
         w(f"### {mkt}: per book and anchor, 2% (exact lines), sorted by bets\n")
         w(book_anchor_table(res["book_anchor"], mkt))
         w("")
+    return lines
 
+
+def _overall(res: dict) -> list[str]:
+    lines: list[str] = []
+    w = lines.append
     w("## All soft books and buckets pooled, every threshold\n")
     ov = res["overall"]
     rows = [[r["mode"], f"{r['threshold']:.0%}", r["market"]] + _cell_cols(r) for _, r in ov.iterrows()]
     w(_table(["lines", "edge ≥", "market"] + CELL_HEAD, rows))
     w("")
+    return lines
 
+
+def _by_anchor_section(res: dict) -> list[str]:
+    lines: list[str] = []
+    w = lines.append
     w("## Overall picture by anchor (all soft books pooled, exact lines)\n")
     for key, title in (("by_anchor", "exact lines"), ("by_anchor_converted", "converted lines")):
         ba = res[key]
@@ -622,12 +653,22 @@ def report_markdown(res: dict) -> str:
         w(_table(["market", "anchor", "soft quotes compared", "books per game", "mean |disagreement|",
                   "share of quotes with edge ≥ 2%", "2% bets per game"] + CELL_HEAD, rows))
         w("")
+    return lines
 
+
+def _by_season_section(res: dict) -> list[str]:
+    lines: list[str] = []
+    w = lines.append
     w("## By season (all soft books pooled, 2%, exact lines)\n")
     rows = [[r["market"], r["season"]] + _cell_cols(r) for _, r in res["by_season"].iterrows()]
     w(_table(["market", "season"] + CELL_HEAD, rows))
     w("")
+    return lines
 
+
+def _discrepancy_section(res: dict) -> list[str]:
+    lines: list[str] = []
+    w = lines.append
     w("## Where each soft book's prices sit against Pinnacle (descriptive, exact lines, all buckets)\n")
     w("hold = the book's own overround; disagreement = book's devigged probability of the home/over side minus "
       "Pinnacle's; best gap = larger of p_fair − 1/price over the two sides.\n")
@@ -637,7 +678,12 @@ def report_markdown(res: dict) -> str:
     w(_table(["market", "book", "quotes", "hold", "mean disagreement", "mean |disagreement|", "mean best gap",
               "share with edge ≥ 2%"], rows))
     w("")
+    return lines
 
+
+def _lag_section(res: dict) -> list[str]:
+    lines: list[str] = []
+    w = lines.append
     w("## Lag: Pinnacle's previous move against each book's next move\n")
     w("corr_next = correlation between Pinnacle's move over b−1 → b and the book's move over b → b+1, pooled over "
       "the five bucket triples and test-season games (95% Fisher interval). Moves are line points (totals, spreads) "
@@ -653,13 +699,23 @@ def report_markdown(res: dict) -> str:
         w(f"**{mkt}**\n")
         w(_table(["book", "pairs", "corr_next", "95% CI", "share of next moves non-zero", "corr_same"], rows))
         w("")
+    return lines
 
+
+def _price_band_section(res: dict) -> list[str]:
+    lines: list[str] = []
+    w = lines.append
     w("## By price taken (descriptive, added after the first run; not pre-registered)\n")
     w("All soft books, 2%, exact lines, buckets pooled. Decimal price of the side bet.\n")
     rows = [[r["market"], r["band"]] + _cell_cols(r) for _, r in res["price_band"].iterrows()]
     w(_table(["market", "decimal price"] + CELL_HEAD, rows))
     w("")
+    return lines
 
+
+def _sign_check(res: dict) -> list[str]:
+    lines: list[str] = []
+    w = lines.append
     w("## Sign check: Pinnacle's fair probability against outcomes\n")
     w("Exact-line quotes, one per game and bucket, test seasons. Side a is Over (totals) or home (spreads, h2h). "
       "If p_fair were attached to the wrong side, the win rate would run opposite to p_fair.\n")
@@ -669,7 +725,12 @@ def report_markdown(res: dict) -> str:
     w(_table(["market", "n", "mean p_fair(a)", "side a won", "n p ≥ ½", "p_fair", "won", "n p < ½", "p_fair", "won"],
              rows))
     w("")
+    return lines
 
+
+def _bug_checks_section(res: dict) -> list[str]:
+    lines: list[str] = []
+    w = lines.append
     w("## Bug-first checks on every book with positive realised ROI (2%, pooled, exact)\n")
     ck = res["checks"]["positive"]
     if len(ck):
@@ -692,10 +753,27 @@ def report_markdown(res: dict) -> str:
     w(_table(["bucket", "min", "median", "max"],
              [[LABELS[b], f"{r['min']:.0f}", f"{r['median']:.0f}", f"{r['max']:.0f}"] for b, r in lb.iterrows()]))
     w("")
+    return lines
 
+
+def _desc_2021(res: dict) -> list[str]:
+    lines: list[str] = []
+    w = lines.append
     w("## 2021-22 (descriptive only; incomplete season)\n")
     for mkt in MARKETS:
         w(f"**{mkt}**\n")
         w(pooled_table(res["pooled_desc"], mkt, top=10))
         w("")
+    return lines
+
+
+REPORT_SECTIONS = (_intro, _hygiene, _polled_after_close, _evidence_bar, _per_market, _overall, _by_anchor_section,
+                   _by_season_section, _discrepancy_section, _lag_section, _price_band_section, _sign_check,
+                   _bug_checks_section, _desc_2021)
+
+
+def report_markdown(res: dict) -> str:
+    lines: list[str] = []
+    for section in REPORT_SECTIONS:
+        lines += section(res)
     return "\n".join(lines)
