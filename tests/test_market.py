@@ -1,19 +1,19 @@
 import pandas as pd
 import pytest
 
-from nbatotals import params as P
+from nbatotals import params as params_io
 from nbatotals.evaluate import market
 
 
 def quotes(rows):
     return pd.DataFrame(
-        [dict(game_id=g, book=b, market="totals", anchor=a, line=l, over_price=o, under_price=u)
-         for g, b, a, l, o, u in rows]
+        [dict(game_id=g, book=b, market="totals", anchor=a, line=line, over_price=o, under_price=u)
+         for g, b, a, line, o, u in rows]
     )
 
 
 def test_consensus_rules():
-    prm = P.load()
+    prm = params_io.load()
     odds = quotes([
         (1, "a", "close", 220.0, 1.91, 1.91),
         (1, "b", "close", 221.0, 1.87, 1.95),

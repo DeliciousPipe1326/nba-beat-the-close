@@ -14,7 +14,7 @@ import sys
 import numpy as np
 import pandas as pd
 
-from nbatotals.evaluate.adapters import legacy_players as LP
+from nbatotals.evaluate.adapters import legacy_players
 
 SEASONS = (2021, 2022, 2023, 2024)
 G1_THRESHOLDS = {"g1a_min": 0.005, "g1b_max": 0.90, "g1c_abs_max": 5.0, "g1d_lo": 225.0, "g1d_hi": 255.0,
@@ -33,11 +33,11 @@ def regular_games(games: pd.DataFrame) -> pd.DataFrame:
 def minutes_frame(dnt, box, games) -> tuple[pd.DataFrame, dict]:
     """DnT rows for joined regular-season games with the player's actual minutes (matched players)."""
     reg = regular_games(games)
-    gmap = LP.dnt_games(dnt, reg)
+    gmap = legacy_players.dnt_games(dnt, reg)
     d = dnt.merge(gmap[["dnt_game_id", "game_id"]], left_on="game_id", right_on="dnt_game_id",
                   suffixes=("_dnt", ""))
     seasons = _season_of_date(games)
-    match = LP.match_players(d.rename(columns={"game_id_dnt": "x"}), box, seasons)
+    match = legacy_players.match_players(d.rename(columns={"game_id_dnt": "x"}), box, seasons)
     d["season"] = d["date"].map(seasons)
     d = d.merge(match, on=["season", "team", "player_id"], how="left")
     act = box[["player_id", "game_id", "minutes"]].rename(columns={"player_id": "bdl_player_id"})
@@ -115,7 +115,8 @@ def absence_anticipation(d: pd.DataFrame) -> pd.DataFrame:
         big = y[y["p_mp"] >= 20]
         rows.append({"season": s, "absences_after_25min_game": len(out),
                      "share_anticipated_p_mp_lt5": float((out["p_mp"] < 5).mean()),
-                     "projected_out_n": len(zeroed), "projected_out_share_played_0": float((zeroed["actual"] == 0).mean()),
+                     "projected_out_n": len(zeroed),
+                     "projected_out_share_played_0": float((zeroed["actual"] == 0).mean()),
                      "team_sum_lt_220": float((ts < 220).mean()), "team_sum_gt_260": float((ts > 260).mean()),
                      "p_mp_missing_rows": int(x["p_mp_missing"].sum()) if "p_mp_missing" in x else 0,
                      "g1a_share_played_0": float((big["actual"] == 0).mean())})
@@ -138,14 +139,14 @@ def g1_pass(t: pd.DataFrame) -> dict:
 
 def ratings_frame(epm, box, games) -> pd.DataFrame:
     reg = regular_games(games)
-    gmap = LP.dnt_games(epm, reg)
+    gmap = legacy_players.dnt_games(epm, reg)
     r = epm.merge(gmap[["dnt_game_id", "game_id"]], left_on="game_id", right_on="dnt_game_id",
                   suffixes=("_dnt", ""))
     seasons = _season_of_date(games)
     r["season"] = r["date"].map(seasons)
-    match = LP.match_players(r, box, seasons)
+    match = legacy_players.match_players(r, box, seasons)
     r = r.merge(match, on=["season", "team", "player_id"], how="left")
-    b = box.assign(perf=LP.game_score_per36(box))[["player_id", "game_id", "perf"]]
+    b = box.assign(perf=legacy_players.game_score_per36(box))[["player_id", "game_id", "perf"]]
     r = r.merge(b.rename(columns={"player_id": "bdl_player_id"}), on=["bdl_player_id", "game_id"], how="left")
     return r.sort_values(["player_id", "season", "date", "game_id"]).reset_index(drop=True)
 
@@ -173,8 +174,8 @@ def g2(r: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     first = r.groupby(["player_id", "season"])["epm"].first()
     last = r.groupby(["player_id", "season"])["epm"].last()
     f = first.reset_index().rename(columns={"epm": "first"})
-    f["last_same"] = last.reindex(list(zip(f["player_id"], f["season"]))).to_numpy()
-    f["last_prev"] = last.reindex(list(zip(f["player_id"], f["season"] - 1))).to_numpy()
+    f["last_same"] = last.reindex(list(zip(f["player_id"], f["season"], strict=True))).to_numpy()
+    f["last_prev"] = last.reindex(list(zip(f["player_id"], f["season"] - 1, strict=True))).to_numpy()
     f = f.dropna()
     c = {"g2c_n": len(f), "g2c_corr_first_vs_prev_last": float(np.corrcoef(f["first"], f["last_prev"])[0, 1]),
          "g2c_corr_first_vs_same_last": float(np.corrcoef(f["first"], f["last_same"])[0, 1]),
@@ -218,15 +219,16 @@ def run() -> dict:
     from nbatotals.evaluate.adapters import legacy_nba_db
 
     games = legacy_nba_db.load()["games"]
-    box = LP.read_player_box()
-    dnt = LP.read_dnt_box()
-    epm = LP.read_player_epm()
+    box = legacy_players.read_player_box()
+    dnt = legacy_players.read_dnt_box()
+    epm = legacy_players.read_player_epm()
     d, info = minutes_frame(dnt, box, games)
     t1 = g1(d, games)
     t1d = absence_anticipation(d)
     r = ratings_frame(epm, box, games)
     t2, c2 = g2(r)
-    return {"info": info, "g1": t1, "g1_desc": t1d, "g1_pass": g1_pass(t1), "g2": t2, "g2c": c2, "g2_pass": g2_pass(t2, c2),
+    return {"info": info, "g1": t1, "g1_desc": t1d, "g1_pass": g1_pass(t1),
+            "g2": t2, "g2c": c2, "g2_pass": g2_pass(t2, c2),
             "ratings_matched_share": float((r["bdl_player_id"] >= 0).mean())}
 
 

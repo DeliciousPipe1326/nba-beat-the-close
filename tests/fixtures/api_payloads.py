@@ -42,7 +42,8 @@ EVENTS = [
 ]
 
 
-def odds_event(event: dict, total: float, books=("fanduel", "draftkings", "betmgm"), last_update="2025-11-04T01:00:00Z"):
+def odds_event(event: dict, total: float, books=("fanduel", "draftkings", "betmgm"),
+               last_update="2025-11-04T01:00:00Z"):
     out = dict(event, bookmakers=[])
     for i, b in enumerate(books):
         out["bookmakers"].append({

@@ -135,7 +135,8 @@ def read_odds(con: sqlite3.Connection) -> pd.DataFrame:
     # payloads, and convert American only where a decimal is missing.
     def dec(american_col):
         decimal = o[american_col.replace("_odds", "_decimal")]
-        return decimal.where(decimal.notna(), o[american_col].map(boxscore.american_to_decimal, na_action="ignore")).astype(float)
+        converted = o[american_col].map(boxscore.american_to_decimal, na_action="ignore")
+        return decimal.where(decimal.notna(), converted).astype(float)
 
     totals = o["market"].eq("totals")
     spreads = o["market"].eq("spreads")

@@ -48,7 +48,8 @@ def build_parser() -> argparse.ArgumentParser:
     t = with_db(sub.add_parser("today", help="write the research CSV for a date's fixtures"))
     t.add_argument("--date", default=None, help="YYYY-MM-DD, default today (US Eastern)")
     t.add_argument("--out", default=None, help="CSV path, default out/today_<date>.csv (git-ignored)")
-    t.add_argument("--model", default=None, help="registered projector (default pace_eff); see nbatotals/model/registry.py")
+    t.add_argument("--model", default=None,
+                   help="registered projector (default pace_eff); see nbatotals/model/registry.py")
     sub.add_parser("verify-legacy", help="read $NBA_LEGACY_DB and print row-count checks")
     bt = sub.add_parser("backtest", help="walk-forward backtest (docs/RESULTS.md)")
     bt.add_argument("--legacy", action="store_true", required=True,
@@ -62,7 +63,8 @@ def build_parser() -> argparse.ArgumentParser:
                          "(docs/experiments/other_markets/PREREGISTRATION.md), true close only")
     bt.add_argument("--params", default=None, help="params.yaml to use (default config/params.yaml)")
     bt.add_argument("--out", default=None, help="where to write the full report (default under docs/)")
-    bt.add_argument("--model", default=None, help="registered projector (default pace_eff); see nbatotals/model/registry.py")
+    bt.add_argument("--model", default=None,
+                    help="registered projector (default pace_eff); see nbatotals/model/registry.py")
     bt.add_argument("--log", default=None, help="fit log path (default docs/search/fit_log[_<model>].tsv.gz)")
     bt.add_argument("--reuse-fit", action="store_true",
                     help="reuse the odds-free walk-forward fit cached in data/ by an earlier run of the same model")
@@ -73,11 +75,13 @@ def build_parser() -> argparse.ArgumentParser:
     bb.add_argument("--out", default=None, help="report path (default docs/experiments/book_lag/report.md)")
     bb.add_argument("--reuse-quotes", action="store_true",
                     help="reuse the parsed payloads cached in data/ by an earlier run (git-ignored)")
-    bp = sub.add_parser("backtest-props", help="Experiment 4: retail player props vs Pinnacle (docs/experiments/props_market)")
+    bp = sub.add_parser("backtest-props",
+                        help="Experiment 4: retail player props vs Pinnacle (docs/experiments/props_market)")
     bp.add_argument("--legacy", action="store_true", required=True,
                     help="use the maintainer's prop payloads ($NBA_LEGACY_PROPS), props DB ($NBA_LEGACY_PROPS_DB) and "
                          "games DB ($NBA_LEGACY_DB); $NBA_LEGACY_MULTIREGION adds the game-totals benchmark")
-    bp.add_argument("--out", default=None, help="full report path (default docs/experiments/props_market/backtest_props_report.md)")
+    bp.add_argument("--out", default=None,
+                    help="full report path (default docs/experiments/props_market/backtest_props_report.md)")
     return p
 
 
@@ -123,7 +127,8 @@ def cmd_backtest_props(args) -> int:
     from nbatotals.evaluate import props_market as pm
     from nbatotals.evaluate.adapters import legacy_multiregion, legacy_nba_db, legacy_props
 
-    missing = [v for v in (legacy_props.ENV_PROPS, legacy_props.ENV_PROPS_DB, legacy_nba_db.ENV_VAR) if not os.environ.get(v)]
+    required = (legacy_props.ENV_PROPS, legacy_props.ENV_PROPS_DB, legacy_nba_db.ENV_VAR)
+    missing = [v for v in required if not os.environ.get(v)]
     if missing:
         print(f"required: {', '.join(missing)}", file=sys.stderr)
         return 2
@@ -144,8 +149,19 @@ def cmd_backtest_props(args) -> int:
     return 0
 
 
+def _projector(name: str | None):
+    """A registered projector; one that needs player inputs gets them from the legacy folders."""
+    from nbatotals.evaluate.adapters import legacy_players
+    from nbatotals.model import registry
+
+    name = name or registry.DEFAULT
+    if getattr(registry.PROJECTORS.get(name), "needs_player_inputs", False):
+        return registry.get(name, inputs=legacy_players.player_inputs_from_env())
+    return registry.get(name)
+
+
 def cmd_backtest(args) -> int:
-    from nbatotals import params as P
+    from nbatotals import params as params_io
     from nbatotals.evaluate import backtest
     from nbatotals.evaluate.adapters import legacy_lake, legacy_multiregion, legacy_nba_db
 
@@ -168,7 +184,7 @@ def cmd_backtest(args) -> int:
     box = frames["team_box"].drop(columns=["legacy_pace"])
     from nbatotals.model import registry
 
-    projector = registry.get(args.model or registry.DEFAULT)
+    projector = _projector(args.model)
     if args.market_type != "totals":
         if args.market != "true-close":
             print("--market-type spreads/h2h is graded against the true close only", file=sys.stderr)
@@ -184,7 +200,7 @@ def cmd_backtest(args) -> int:
         spec = backtest.TEMPORAL
         out_path = args.out or str(ROOT / "docs" / f"backtest_legacy_temporal_report{suffix}.md")
     log_path = args.log or str(ROOT / "docs" / "search" / f"fit_log{suffix}.tsv.gz")
-    base = P.load(args.params)
+    base = params_io.load(args.params)
     cache = ROOT / "data" / f"fit_cache{suffix}.pkl"
     fitted = None
     if args.reuse_fit and cache.exists():
@@ -212,11 +228,11 @@ def _backtest_sides(args, games, box, projector) -> int:
     """Experiment 5: spreads or moneyline against the true close (pre-registered first)."""
     import pickle
 
-    from nbatotals import params as P
+    from nbatotals import params as params_io
     from nbatotals.evaluate import market, sides
     from nbatotals.evaluate.adapters import legacy_multiregion as mr
 
-    base = P.load(args.params)
+    base = params_io.load(args.params)
     quotes, counts = {}, {}
     for mt in ("spreads", "h2h"):
         quotes[mt], counts[mt] = mr.side_quotes(mr.read_files(market=mt), games, mt)
@@ -261,11 +277,11 @@ def backtest_headline(res) -> str:
 def cmd_store(args) -> int:
     import json
 
-    from nbatotals import params as P
+    from nbatotals import params as params_io
     from nbatotals import store
     from nbatotals.ingest import balldontlie, common, theodds
 
-    prm = P.load(args.params)
+    prm = params_io.load(args.params)
     con = store.connect(args.db)
     try:
         if args.command == "init":
@@ -292,12 +308,12 @@ def cmd_store(args) -> int:
             date = args.date or _today_eastern()
             out = Path(args.out or ROOT / "out" / f"today_{date}.csv")
             out.parent.mkdir(parents=True, exist_ok=True)
-            df = today.build(con, date, prm, model=args.model)
+            df = today.build(con, date, prm, projector=_projector(args.model))
             today.write_csv(df, out)
             print(today.HEADER)
             print(df.to_string(index=False) if len(df) else f"no fixtures for {date} in the store; run ingest-games")
             print(f"\nwritten: {out}")
-    except (common.MissingKey, common.ApiError) as exc:
+    except (common.MissingKeyError, common.ApiError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     finally:

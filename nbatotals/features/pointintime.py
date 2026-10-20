@@ -164,7 +164,7 @@ def build_features(targets: pd.DataFrame, games: pd.DataFrame, box: pd.DataFrame
     days = _day_numbers(targets["game_date"])
     rows = []
     for (gid, season, home, away), day in zip(
-        targets[["id", "season", "home", "away"]].itertuples(index=False, name=None), days
+        targets[["id", "season", "home", "away"]].itertuples(index=False, name=None), days, strict=True
     ):
         day = int(day)
         season = int(season)

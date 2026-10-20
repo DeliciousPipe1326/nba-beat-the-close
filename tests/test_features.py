@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from nbatotals import params as P
+from nbatotals import params as params_io
 from nbatotals.features.pointintime import build_features
 from nbatotals.model.projection import project
 from tests.fixtures import synthetic
@@ -15,7 +15,7 @@ def league():
 
 @pytest.fixture(scope="module")
 def prm():
-    return P.load()
+    return params_io.load()
 
 
 def team_history(games, box, team, before, season):
@@ -23,7 +23,8 @@ def team_history(games, box, team, before, season):
     rows = box[box["team"] == team].copy()
     rows["game_date"] = g.loc[rows["game_id"], "game_date"].to_numpy()
     rows["season"] = g.loc[rows["game_id"], "season"].to_numpy()
-    rows["opp_pts"] = np.where(rows["is_home"] == 1, g.loc[rows["game_id"], "away_pts"], g.loc[rows["game_id"], "home_pts"])
+    at = g.loc[rows["game_id"]]
+    rows["opp_pts"] = np.where(rows["is_home"] == 1, at["away_pts"], at["home_pts"])
     rows = rows[(rows["game_date"] < before) & (rows["season"] == season)]
     return rows.sort_values(["game_date", "game_id"])
 
@@ -62,7 +63,7 @@ def test_first_season_falls_back_to_constants(league, prm):
 
 def test_carryover_is_an_explicit_knob(league, prm):
     games, box = league
-    p = P.with_overrides(prm, {"features.team_carryover_weight": 0.5})
+    p = params_io.with_overrides(prm, {"features.team_carryover_weight": 0.5})
     opener = games[games["game_date"] == games.loc[games["season"] == 2022, "game_date"].min()]
     f = build_features(opener.iloc[:1], games, box, p)
     team = opener.iloc[0]["home"]
@@ -122,7 +123,7 @@ def test_rest_and_b2b_come_from_schedule_only(league, prm):
 
 def test_home_away_split_uses_only_matching_venue(league, prm):
     games, box = league
-    p = P.with_overrides(prm, {"features.home_away_split": True})
+    p = params_io.with_overrides(prm, {"features.home_away_split": True})
     target = games[games["season"] == 2022].iloc[450]
     f = build_features(games[games["id"] == target["id"]], games, box, p).iloc[0]
     hist = team_history(games, box, target["home"], target["game_date"], 2022)
@@ -135,7 +136,7 @@ def test_projection_formula(prm):
     f = pd.DataFrame([dict(game_id=1, league_pace=100.0, league_ortg=110.0, home_pace=102.0, away_pace=97.0,
                            home_ortg=115.0, home_drtg=108.0, away_ortg=111.0, away_drtg=113.0,
                            home_b2b=True, away_b2b=False)])
-    p = P.with_overrides(prm, {"projection.pace_weight": 1.0, "projection.home_court_total": 1.5,
+    p = params_io.with_overrides(prm, {"projection.pace_weight": 1.0, "projection.home_court_total": 1.5,
                                "projection.b2b_total_per_team": -2.0})
     out = project(f, p).iloc[0]
     pace = 100 + (2 - 3)
@@ -147,6 +148,6 @@ def test_projection_formula(prm):
 
 def test_params_validation(prm):
     with pytest.raises(ValueError):
-        P.with_overrides(prm, {"features.blend": {"l3": 0.5, "l10": 0.5, "season": 0.5}})
+        params_io.with_overrides(prm, {"features.blend": {"l3": 0.5, "l10": 0.5, "season": 0.5}})
     with pytest.raises(KeyError):
-        P.with_overrides(prm, {"projection.intercept": 1.0})
+        params_io.with_overrides(prm, {"projection.intercept": 1.0})

@@ -48,7 +48,9 @@ class LineupPaceEff:
     @property
     def inputs(self) -> PlayerInputs:
         if self._inputs is None:
-            self._inputs = PlayerInputs.from_env()
+            raise RuntimeError("lineup_pace_eff needs player inputs: construct it with inputs=PlayerInputs(...); "
+                               "the CLI loads them with nbatotals.evaluate.adapters.legacy_players."
+                               "player_inputs_from_env()")
         return self._inputs
 
     # ------------------------------------------------------------------ components
@@ -79,8 +81,13 @@ class LineupPaceEff:
 
     @staticmethod
     def total(c: pd.DataFrame, s: float, k: float, cfg: dict) -> np.ndarray:
-        lam = {side: (np.ones(len(c)) if k == 0 else c[f"{side}_n"].to_numpy(float) / (c[f"{side}_n"].to_numpy(float) + k))
-               for side in ("home", "away")}
+        def weight(side: str) -> np.ndarray:
+            if k == 0:
+                return np.ones(len(c))
+            n = c[f"{side}_n"].to_numpy(float)
+            return n / (n + k)
+
+        lam = {side: weight(side) for side in ("home", "away")}
         h, a = lam["home"], lam["away"]
         pace = c["league_pace"] + h * c["home_dP"] + a * c["away_dP"]
         off_home = c["league_ortg"] + s * h * c["home_dO"] - s * a * c["away_dDv"]

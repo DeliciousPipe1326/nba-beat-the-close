@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from nbatotals import params as P
+from nbatotals import params as params_io
 from nbatotals.evaluate import backtest, leakage, market, metrics, sides
 from nbatotals.evaluate.adapters import legacy_multiregion as mr
 from nbatotals.model import registry
@@ -14,12 +14,12 @@ from tests.fixtures import synthetic
 
 
 def side_quotes(market_name, rows):
-    return pd.DataFrame([dict(game_id=g, book=b, market=market_name, anchor=a, line=l, home_price=h, away_price=w)
-                         for g, b, a, l, h, w in rows])
+    return pd.DataFrame([dict(game_id=g, book=b, market=market_name, anchor=a, line=line, home_price=h, away_price=w)
+                         for g, b, a, line, h, w in rows])
 
 
 def test_spreads_consensus_rules():
-    prm = P.load()
+    prm = params_io.load()
     odds = side_quotes("spreads", [
         (1, "a", "true_close", -4.5, 1.91, 1.91),
         (1, "b", "true_close", -5.0, 1.87, 1.95),
@@ -41,7 +41,7 @@ def test_spreads_consensus_rules():
 
 
 def test_h2h_devig_is_multiplicative_mean_over_books():
-    prm = P.load()
+    prm = params_io.load()
     odds = side_quotes("h2h", [
         (1, "a", "true_close", None, 1.50, 2.70),
         (1, "b", "true_close", None, 1.45, 2.85),
@@ -59,8 +59,8 @@ def test_h2h_devig_is_multiplicative_mean_over_books():
 
 def _wide(rows):
     """Wide consensus rows: (game_id, anchor, implied home margin, p_home, home price, away price)."""
-    cons = pd.DataFrame([dict(game_id=g, anchor=a, books=3, line=l, p_over=p, p_under=1 - p, over_price=h,
-                              under_price=w) for g, a, l, p, h, w in rows])
+    cons = pd.DataFrame([dict(game_id=g, anchor=a, books=3, line=line, p_over=p, p_under=1 - p, over_price=h,
+                              under_price=w) for g, a, line, p, h, w in rows])
     return market.wide(cons)
 
 
@@ -150,8 +150,10 @@ def test_side_quotes_map_outcomes_by_team_name(tmp_path):
     games = pd.DataFrame([dict(id=1, game_date="2023-11-01", season=2023, home="BOS", away="NYK")])
     bos, nyk = "Boston Celtics", "New York Knicks"
     _write_side(tmp_path, "spreads", 1, "true_close", "2023-11-01T23:15:00Z", "2023-11-01T23:30:00Z", [
-        ("a", [{"name": nyk, "price": 105, "point": 6.5}, {"name": bos, "price": -125, "point": -6.5}]),  # away listed first
-        ("b", [{"name": bos, "price": -110, "point": -6.0}, {"name": nyk, "price": -110, "point": 5.5}]),  # points disagree
+        # away listed first
+        ("a", [{"name": nyk, "price": 105, "point": 6.5}, {"name": bos, "price": -125, "point": -6.5}]),
+        # points disagree
+        ("b", [{"name": bos, "price": -110, "point": -6.0}, {"name": nyk, "price": -110, "point": 5.5}]),
     ])
     _write_side(tmp_path, "h2h", 1, "true_close", "2023-11-01T23:15:00Z", "2023-11-01T23:30:00Z", [
         ("a", [{"name": nyk, "price": 220}, {"name": bos, "price": -270}]),
@@ -174,7 +176,7 @@ def league():
 @pytest.mark.parametrize("name", ["pace_eff", "elo_total"])
 def test_predict_margin_passes_truncation(league, name):
     games, box = league
-    prm = P.load()
+    prm = params_io.load()
     sample = leakage.stratified_sample(games, per_cell=10)
     res = leakage.projector_truncation_check(registry.get(name), games, box, prm, sample,
                                              method="predict_margin", column="margin_proj")
@@ -183,7 +185,7 @@ def test_predict_margin_passes_truncation(league, name):
 
 def test_margin_calibration_uses_earlier_seasons_only(league):
     games, box = league
-    prm = P.load()
+    prm = params_io.load()
     proj = registry.get("elo_total")
     pred, fits = sides.margin_predictions(games, box, prm, proj, test_seasons=(2022,))
     # rewriting every 2022 result changes no fitted calibration constant

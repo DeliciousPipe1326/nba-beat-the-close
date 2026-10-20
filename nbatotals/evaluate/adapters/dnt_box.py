@@ -65,7 +65,7 @@ def game_keys(rows: pd.DataFrame) -> pd.DataFrame:
 def match_games(rows: pd.DataFrame, games: pd.DataFrame) -> pd.DataFrame:
     """DnT game -> this project's game id, by Eastern date and both aliases."""
     k = game_keys(rows)
-    g = games.assign(teams=[frozenset(t) for t in zip(games["home"], games["away"])])
+    g = games.assign(teams=[frozenset(t) for t in zip(games["home"], games["away"], strict=True)])
     m = k.merge(g[["game_date", "teams", "id"]], left_on=["date", "teams"], right_on=["game_date", "teams"],
                 how="inner")
     if m["id"].duplicated().any() or m["game_id"].duplicated().any():

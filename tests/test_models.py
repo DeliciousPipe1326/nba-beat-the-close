@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from nbatotals import params as P
+from nbatotals import params as params_io
 from nbatotals.evaluate import backtest
 from nbatotals.model import base, registry
 from nbatotals.model.elo_total import EloTotal
@@ -16,7 +16,7 @@ def league():
 
 @pytest.fixture(scope="module")
 def prm():
-    return P.load()
+    return params_io.load()
 
 
 def test_registry_lists_and_validates():

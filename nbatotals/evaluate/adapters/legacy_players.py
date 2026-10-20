@@ -32,7 +32,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from nbatotals.features.players import dnt_games  # noqa: F401  (re-exported for the gate)
+from nbatotals.features.players import PlayerInputs, dnt_games  # noqa: F401  (dnt_games re-exported for the gate)
 from nbatotals.teams import BDL_ID_TO_ALIAS, NBA_STATS_ID_TO_ALIAS
 
 DNT_ENV = "NBA_LEGACY_DNT"
@@ -119,7 +119,7 @@ def read_player_box(props_db=None, legacy_db=None) -> pd.DataFrame:
     box["team"] = box["team_id"].map(BDL_ID_TO_ALIAS)
     box["minutes"] = np.where(box["is_dnp"].astype(bool), 0.0, box["minutes_decimal"].fillna(0.0))
     box["name_key"] = [normalise_name(f"{a} {b}") if isinstance(a, str) else None
-                       for a, b in zip(box["first_name"], box["last_name"])]
+                       for a, b in zip(box["first_name"], box["last_name"], strict=True)]
     return box
 
 
@@ -162,3 +162,16 @@ def game_score_per36(box: pd.DataFrame) -> pd.Series:
           + 0.3 * box["defensive_rebounds"] + box["steals"] + 0.7 * box["assists"] + 0.7 * box["blocks"]
           - 0.4 * box["fouls"] - box["turnovers"])
     return (36 * gs / box["minutes"]).where(box["minutes"] >= 10)
+
+
+def player_inputs(dnt_dir=None, epm_dir=None) -> PlayerInputs:
+    """Player inputs for lineup projectors, read from the private folders (paths default to the env vars)."""
+    return PlayerInputs(read_dnt_box(dnt_dir), read_player_epm(epm_dir))
+
+
+def player_inputs_from_env() -> PlayerInputs:
+    missing = [v for v in (DNT_ENV, EPM_ENV) if not os.environ.get(v)]
+    if missing:
+        raise RuntimeError(f"lineup projectors need player inputs: set {', '.join(missing)} "
+                           "(see nbatotals/evaluate/adapters/legacy_players.py)")
+    return player_inputs()

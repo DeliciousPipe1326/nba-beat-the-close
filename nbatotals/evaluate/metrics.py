@@ -59,19 +59,20 @@ def bootstrap_cluster_mean_ci(x, groups, n_boot: int = N_BOOT, seed: int = SEED)
     return (float(np.quantile(means, 0.025)), float(np.quantile(means, 0.975)), float(means.std(ddof=1)))
 
 
-def ols(y, X: dict) -> dict:
+def ols(y, columns: dict) -> dict:
     """OLS of y on an intercept plus the named columns; classic standard errors."""
-    names = ["const"] + list(X)
-    A = np.column_stack([np.ones(len(y))] + [np.asarray(v, dtype=float) for v in X.values()])
+    names = ["const"] + list(columns)
+    design = np.column_stack([np.ones(len(y))] + [np.asarray(v, dtype=float) for v in columns.values()])
     y = np.asarray(y, dtype=float)
-    beta, *_ = np.linalg.lstsq(A, y, rcond=None)
-    resid = y - A @ beta
-    dof = len(y) - A.shape[1]
+    beta, *_ = np.linalg.lstsq(design, y, rcond=None)
+    resid = y - design @ beta
+    dof = len(y) - design.shape[1]
     sigma2 = resid @ resid / dof
-    cov = sigma2 * np.linalg.inv(A.T @ A)
+    cov = sigma2 * np.linalg.inv(design.T @ design)
     se = np.sqrt(np.diag(cov))
     return {n: {"coef": float(b), "lo": float(b - Z95 * s), "hi": float(b + Z95 * s), "se": float(s)}
-            for n, b, s in zip(names, beta, se)} | {"n": len(y), "rmse": float(np.sqrt(resid @ resid / len(y)))}
+            for n, b, s in zip(names, beta, se, strict=True)} | {
+        "n": len(y), "rmse": float(np.sqrt(resid @ resid / len(y)))}
 
 
 def corr_ci(x, y) -> tuple[float, float, float, int]:
@@ -119,7 +120,10 @@ def fit_logistic_scale(margin, y, lo: float = 1.0, hi: float = 60.0) -> float:
     """Scale s maximising the likelihood of y under p = 1 / (1 + exp(−margin / s)), searched on [lo, hi]
     (golden section; the log likelihood is unimodal in 1/s)."""
     margin, y = np.asarray(margin, float), np.asarray(y, float)
-    nll = lambda s: log_loss(1 / (1 + np.exp(-margin / s)), y).sum()
+
+    def nll(s):
+        return log_loss(1 / (1 + np.exp(-margin / s)), y).sum()
+
     g = (np.sqrt(5) - 1) / 2
     a, b = lo, hi
     c, d = b - g * (b - a), a + g * (b - a)
@@ -138,23 +142,23 @@ def fit_logistic_scale(margin, y, lo: float = 1.0, hi: float = 60.0) -> float:
     return float((a + b) / 2)
 
 
-def logistic_regression(y, X: dict, max_iter: int = 100) -> dict:
+def logistic_regression(y, columns: dict, max_iter: int = 100) -> dict:
     """Maximum-likelihood logistic regression of y on an intercept plus the named columns
     (Newton–Raphson); Wald 95% intervals from the observed information."""
-    names = ["const"] + list(X)
-    A = np.column_stack([np.ones(len(y))] + [np.asarray(v, dtype=float) for v in X.values()])
+    names = ["const"] + list(columns)
+    design = np.column_stack([np.ones(len(y))] + [np.asarray(v, dtype=float) for v in columns.values()])
     y = np.asarray(y, dtype=float)
-    beta = np.zeros(A.shape[1])
+    beta = np.zeros(design.shape[1])
     for _ in range(max_iter):
-        p = 1 / (1 + np.exp(-(A @ beta)))
-        W = p * (1 - p)
-        H = A.T @ (A * W[:, None])
-        step = np.linalg.solve(H, A.T @ (y - p))
+        p = 1 / (1 + np.exp(-(design @ beta)))
+        weights = p * (1 - p)
+        hessian = design.T @ (design * weights[:, None])
+        step = np.linalg.solve(hessian, design.T @ (y - p))
         beta = beta + step
         if np.max(np.abs(step)) < 1e-10:
             break
-    p = 1 / (1 + np.exp(-(A @ beta)))
-    cov = np.linalg.inv(A.T @ (A * (p * (1 - p))[:, None]))
+    p = 1 / (1 + np.exp(-(design @ beta)))
+    cov = np.linalg.inv(design.T @ (design * (p * (1 - p))[:, None]))
     se = np.sqrt(np.diag(cov))
     return {n: {"coef": float(b), "lo": float(b - Z95 * s), "hi": float(b + Z95 * s), "se": float(s)}
-            for n, b, s in zip(names, beta, se)} | {"n": len(y), "log_loss": float(log_loss(p, y).mean())}
+            for n, b, s in zip(names, beta, se, strict=True)} | {"n": len(y), "log_loss": float(log_loss(p, y).mean())}

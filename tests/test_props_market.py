@@ -124,7 +124,7 @@ def test_settlement_win_loss_push_void_unmatched():
                q("us", "fanduel", "Luka Doncic", "under", 9.0, 100, market="player_assists"),  # 9 = 9: push
                q("us", "fanduel", "Nobody Known", "over", 10.5, 100)])     # not in the box score: unmatched
     bets, _, mc = _pipeline(rows)
-    res = dict(zip(bets["player"] + "/" + bets["side"], bets["result"]))
+    res = dict(zip(bets["player"] + "/" + bets["side"], bets["result"], strict=True))
     assert res == {"Jayson Tatum/over": "win", "Jayson Tatum/under": "loss", "Jalen Brunson/over": "void",
                    "Luka Doncic/under": "push", "Nobody Known/over": "unmatched"}
     assert bets.loc[bets["result"] == "win", "profit"].iloc[0] == pytest.approx(1.0)
@@ -190,8 +190,9 @@ def test_read_files_and_end_to_end(tmp_path):
             "id": "e1", "commence_time": TIP, "home_team": "Boston Celtics", "away_team": "New York Knicks",
             "bookmakers": [{"key": k, "last_update": captured,
                             "markets": [{"key": market, "last_update": captured,
-                                         "outcomes": [{"name": s, "description": "Jayson Tatum", "price": p, "point": 25.5}
-                                                      for s, p in outs]}]} for k, outs in books]}}
+                                         "outcomes": [{"name": s, "description": "Jayson Tatum", "price": p,
+                                                       "point": 25.5} for s, p in outs]}]}
+                           for k, outs in books]}}
         stamp = captured.replace("-", "").replace(":", "")[:13]
         (d / f"event_e1_{market}_{stamp}.json").write_text(json.dumps(payload))
 

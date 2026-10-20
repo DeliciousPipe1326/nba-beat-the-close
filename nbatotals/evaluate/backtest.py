@@ -127,7 +127,8 @@ def predictions(games, box, base, test_seasons=TEST_SEASONS, progress=None, log_
 
 # --------------------------------------------------------------------------- grading
 
-def _bets(pred: pd.DataFrame, w: pd.DataFrame, anchor: str, proj_col: str, spec: MarketSpec = TRUE_CLOSE) -> pd.DataFrame:
+def _bets(pred: pd.DataFrame, w: pd.DataFrame, anchor: str, proj_col: str,
+          spec: MarketSpec = TRUE_CLOSE) -> pd.DataFrame:
     d = pred.merge(w, on="game_id", how="inner")
     d = d[d[f"line_{anchor}"].notna()].copy()
     line = d[f"line_{anchor}"]
@@ -269,12 +270,12 @@ def pinnacle_grading(pred: pd.DataFrame, odds: pd.DataFrame, base: dict, spec: M
     """Secondary: grade against Pinnacle's own line and devigged price at `anchor` (default: the reference)."""
     import dataclasses
 
-    from nbatotals import params as P
+    from nbatotals import params as params_io
 
     anchor = anchor or spec.ref
     at = dataclasses.replace(spec, ref=anchor)  # graded at that anchor's own line and price; no CLV
     pin = odds[(odds["book"] == "pinnacle") & (odds["anchor"] == anchor)]
-    cons = market.consensus(pin, P.with_overrides(base, {"market.min_books": 1}))
+    cons = market.consensus(pin, params_io.with_overrides(base, {"market.min_books": 1}))
     bets = _bets(pred, market.wide(cons), anchor, "proj", at)
     rows = []
     for t in THRESHOLDS:
@@ -330,12 +331,13 @@ def headline_table(res: dict) -> str:
     g = res["grading"]
     rows = []
     for s in list(TEST_SEASONS) + ["pooled"]:
-        c = g[(g.run == "tuned") & (g.anchor == spec.ref) & (g.cut == "all") & (g.threshold == 0) & (g.season == s)].iloc[0]
+        primary = (g.run == "tuned") & (g.cut == "all") & (g.threshold == 0) & (g.season == s)
+        c = g[primary & (g.anchor == spec.ref)].iloc[0]
         row = [season_label(s), f"{int(c.n):,}", f"{_pct(c.cover)} ({_pct(c.cover_lo)}–{_pct(c.cover_hi)})",
                _pct(c.baseline), f"{_pct(c.fair_roi)} ({_pct(c.fair_lo)} to {_pct(c.fair_hi)})",
                f"{_pct(c.real_roi)} ({_pct(c.real_lo)} to {_pct(c.real_hi)})"]
         for a in spec.headline_clv:
-            o = g[(g.run == "tuned") & (g.anchor == a) & (g.cut == "all") & (g.threshold == 0) & (g.season == s)].iloc[0]
+            o = g[primary & (g.anchor == a)].iloc[0]
             row += [f"{int(o.clv_n):,}", f"{o.clv_pts:+.2f} ({o.clv_lo:+.2f} to {o.clv_hi:+.2f})"]
         rows.append(row)
     head = ["season", f"n ({spec.labels[spec.ref]})", "cover (95% Wilson)", "no-info baseline", "fair ROI (95% CI)",
@@ -368,7 +370,8 @@ def pinnacle_table(res: dict) -> str:
              f"{_pct(x.cover)} ({_pct(x.cover_lo)}–{_pct(x.cover_hi)})", _pct(x.baseline),
              f"{_pct(x.fair_roi)} ({_pct(x.fair_lo)} to {_pct(x.fair_hi)})",
              f"{_pct(x.real_roi)} ({_pct(x.real_lo)} to {_pct(x.real_hi)})"] for x in p.itertuples()]
-    return _table(["edge ≥", "season", "n", "pushes", "cover (95% Wilson)", "baseline", "fair ROI at Pinnacle's devigged price (CI)",
+    return _table(["edge ≥", "season", "n", "pushes", "cover (95% Wilson)", "baseline",
+                   "fair ROI at Pinnacle's devigged price (CI)",
                    "ROI at Pinnacle's own price (CI)"], rows)
 
 
@@ -402,7 +405,12 @@ def fit_table(res: dict) -> str:
                        "home court", "B2B per team", "train RMSE chosen", "train RMSE default", "test RMSE chosen",
                        "test RMSE default"], rows)
     cols = [c for c in f.columns if c not in ("test_season",)]
-    fmt = lambda v: f"{v:,}" if isinstance(v, (int, np.integer)) else f"{v:.3f}" if isinstance(v, float) else str(v)
+
+    def fmt(v):
+        if isinstance(v, (int, np.integer)):
+            return f"{v:,}"
+        return f"{v:.3f}" if isinstance(v, float) else str(v)
+
     rows = [[season_label(r["test_season"])] + [fmt(r[c]) for c in cols] for _, r in f.iterrows()]
     return _table(["test season"] + [c.replace("_", " ") for c in cols], rows)
 
@@ -410,11 +418,11 @@ def fit_table(res: dict) -> str:
 def accuracy_table(res: dict) -> str:
     spec = res["spec"]
     a = res["accuracy"]
-    L = res["labels"]
+    labels = res["labels"]
     rows = []
     for r in a.itertuples():
         for anchor in (spec.ref,) + spec.clv_from:
-            rows.append([season_label(r.season), L[anchor], f"{getattr(r, f'n_{anchor}'):,}",
+            rows.append([season_label(r.season), labels[anchor], f"{getattr(r, f'n_{anchor}'):,}",
                          f"{getattr(r, f'mae_proj_{anchor}'):.2f}", f"{getattr(r, f'mae_default_{anchor}'):.2f}",
                          f"{getattr(r, f'mae_line_{anchor}'):.2f}", f"{getattr(r, f'rmse_proj_{anchor}'):.2f}",
                          f"{getattr(r, f'rmse_default_{anchor}'):.2f}", f"{getattr(r, f'rmse_line_{anchor}'):.2f}"])
@@ -437,7 +445,8 @@ def edge_move_table(res: dict) -> str:
     e = res["edge_move"]
     rows = [[res["labels"][x.anchor], season_label(x.season), f"{x.n:,}", f"{x.r:+.3f} ({x.lo:+.3f}, {x.hi:+.3f})"]
             for x in e.itertuples()]
-    return _table(["bet anchor", "season", "n", f"corr(model − anchor line, {spec.ref} line − anchor line) (95% CI)"], rows)
+    head = f"corr(model − anchor line, {spec.ref} line − anchor line) (95% CI)"
+    return _table(["bet anchor", "season", "n", head], rows)
 
 
 def sanity_markdown(res: dict) -> str:

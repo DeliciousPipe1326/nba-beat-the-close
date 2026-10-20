@@ -1,6 +1,6 @@
 """The Tier A pace x efficiency formula as a projector (the pre-registered model).
 
-`fit` runs the declared grid (nbatotals/evaluate/fit.py) on earlier seasons and
+`fit` runs the declared grid (nbatotals/model/pace_eff_fit.py) on earlier seasons and
 keeps the lowest-RMSE point; `predict` builds point-in-time features and applies
 the formula in nbatotals/model/projection.py.
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from nbatotals.evaluate import fit
+from nbatotals.model import pace_eff_fit as fit
 from nbatotals.features.pointintime import build_features
 from nbatotals.model.projection import project
 

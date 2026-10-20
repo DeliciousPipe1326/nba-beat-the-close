@@ -23,7 +23,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from nbatotals import params as P
+from nbatotals import params as params_io
 from nbatotals.evaluate import backtest, market, metrics
 from nbatotals.evaluate.backtest import TEST_SEASONS, TRUE_CLOSE as SPEC, _table, season_label
 
@@ -99,13 +99,13 @@ def paired_clv(pa, pb, w, anchors=SPEC.clv_from) -> pd.DataFrame:
 
 def player_minutes(games):
     """DnT rows joined to regular-season games with matched actual minutes and previous-game minutes."""
-    from nbatotals.evaluate.adapters import legacy_players as LP
-    from nbatotals.experiments import info_latency_gate as G
+    from nbatotals.evaluate.adapters import legacy_players
+    from nbatotals.experiments import info_latency_gate as gate
 
-    box = LP.read_player_box()
-    d, _ = G.minutes_frame(LP.read_dnt_box(), box, games)
+    box = legacy_players.read_player_box()
+    d, _ = gate.minutes_frame(legacy_players.read_dnt_box(), box, games)
     m = d[d["matched"]].copy()
-    m["prev"] = G._prev_game_minutes(m)
+    m["prev"] = gate._prev_game_minutes(m)
     return d, m
 
 
@@ -171,8 +171,9 @@ def headline_compare(c: dict) -> str:
     for name, x in c.items():
         for s in SEASONS:
             r = x[(x["anchor"] == SPEC.ref) & (x["season"] == s)].iloc[0]
-            rows.append([name, season_label(s), f"{int(r.n):,}", f"{_pct(r.cover)} ({_pct(r.cover_lo)}–{_pct(r.cover_hi)})",
-                         _pct(r.baseline), f"{_pct(r.fair_roi)} ({_pct(r.fair_lo)} to {_pct(r.fair_hi)})",
+            rows.append([name, season_label(s), f"{int(r.n):,}",
+                         f"{_pct(r.cover)} ({_pct(r.cover_lo)}–{_pct(r.cover_hi)})", _pct(r.baseline),
+                         f"{_pct(r.fair_roi)} ({_pct(r.fair_lo)} to {_pct(r.fair_hi)})",
                          f"{_pct(r.real_roi)} ({_pct(r.real_lo)} to {_pct(r.real_hi)})"])
     return _table(["projector", "season", f"n ({SPEC.labels[SPEC.ref]})", "cover (95% Wilson)", "no-info baseline",
                    "fair ROI (95% CI)", "real ROI (95% CI)"], rows)
@@ -241,11 +242,10 @@ def bias_table(preds: dict) -> str:
 
 
 def run(out: Path) -> dict:
-    from nbatotals.evaluate.adapters import legacy_nba_db
-    from nbatotals.features.players import PlayerInputs
+    from nbatotals.evaluate.adapters import legacy_nba_db, legacy_players
     from nbatotals.model.lineup_pace_eff import LineupPaceEff
 
-    base = P.load()
+    base = params_io.load()
     frames = legacy_nba_db.load()
     games, box = frames["games"], frames["team_box"].drop(columns=["legacy_pace"])
     quotes, w = load_market(games, base)
@@ -259,7 +259,7 @@ def run(out: Path) -> dict:
     # placebo: same projector, DnT minutes replaced by previous-game actual minutes
     d, m = player_minutes(games)
     pcache = ROOT / "data" / f"fit_cache_{PLACEBO}.pkl"
-    inputs = PlayerInputs.from_env()
+    inputs = legacy_players.player_inputs_from_env()
     pin_inputs, replaced = placebo_inputs(inputs, d, m)
     if pcache.exists():
         fitted[PLACEBO] = pickle.loads(pcache.read_bytes())
@@ -287,7 +287,10 @@ def run(out: Path) -> dict:
     sides = {n: clv_by_side(preds[n], w) for n in ("lineup_pace_eff", "pace_eff")}
     paired = paired_clv(preds["lineup_pace_eff"], preds["pace_eff"], w)
     lp = c["lineup_pace_eff"]
-    lb = lambda a: lp[(lp["anchor"] == a) & (lp["season"] == "pooled")].iloc[0]["clv_lo"]
+
+    def lb(a):
+        return lp[(lp["anchor"] == a) & (lp["season"] == "pooled")].iloc[0]["clv_lo"]
+
     info = {"I1 opening CLV lower bound > +0.39": bool(lb("opening") > 0.39),
             "I2 noon CLV lower bound > 0": bool(lb("noon") > 0)}
     edge_res = backtest.evidence(_grading_for_evidence(preds["lineup_pace_eff"], w), SPEC)
@@ -341,7 +344,8 @@ def markdown(res: dict) -> str:
         "## 4. Blend regression: actual = a + b·true close + c·lineup_pace_eff",
         backtest.regression_table({"spec": SPEC, "regression": res["reg"]}),
         "Three-way, pooled tuned: actual = a + b·close + c1·pace_eff + c2·lineup_pace_eff: " + ", ".join(
-            f"{k} {r3[k]['coef']:+.3f} ({r3[k]['lo']:+.3f}, {r3[k]['hi']:+.3f})" for k in ("close", "pace_eff", "lineup"))
+            f"{k} {r3[k]['coef']:+.3f} ({r3[k]['lo']:+.3f}, {r3[k]['hi']:+.3f})"
+            for k in ("close", "pace_eff", "lineup"))
         + f"; n = {r3['n']:,}.",
         "## 5. Decomposition: games whose DnT lineup differs materially from the previous game",
         "A game is a lineup change if either team has a player with p_mp < 5 who played 25+ minutes in the team's "

@@ -5,7 +5,7 @@ import os
 import pandas as pd
 import pytest
 
-from nbatotals import params as P
+from nbatotals import params as params_io
 from nbatotals.evaluate import leakage
 from nbatotals.model import registry
 from tests.fixtures import synthetic
@@ -25,7 +25,7 @@ def league():
 
 @pytest.fixture(scope="module")
 def prm():
-    return P.load()
+    return params_io.load()
 
 
 def test_truncation_bit_identical_on_200_plus_games(league, prm):
@@ -47,7 +47,7 @@ def test_truncation_bit_identical_on_200_plus_games(league, prm):
 def test_truncation_holds_for_every_knob(league, prm, overrides):
     games, box = league
     sample = leakage.stratified_sample(games, per_cell=8, seed=3)
-    res = leakage.truncation_check(games, box, P.with_overrides(prm, overrides), sample)
+    res = leakage.truncation_check(games, box, params_io.with_overrides(prm, overrides), sample)
     assert res["mismatches"] == []
 
 

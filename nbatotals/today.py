@@ -27,8 +27,10 @@ COLUMNS = ["game_date", "tip_utc", "away", "home", "model", "projected_total", "
            "books", "p_over_devig", "edge", "games_played_home", "games_played_away"]
 
 
-def build(con: sqlite3.Connection, date: str, params: dict, model: str | None = None) -> pd.DataFrame:
-    """`model` is a registered projector, used untuned (state=None: the values in params.yaml).
+def build(con: sqlite3.Connection, date: str, params: dict, model: str | None = None,
+          projector=None) -> pd.DataFrame:
+    """`model` is a registered projector's name, used untuned (state=None: the values in params.yaml).
+    Pass `projector` instead for one that needs constructor arguments (the CLI does, for lineup models).
 
     projected_pace and the per-team points are filled for pace_eff only.
     """
@@ -36,7 +38,7 @@ def build(con: sqlite3.Connection, date: str, params: dict, model: str | None = 
     targets = games[games["game_date"] == date]
     if targets.empty:
         return pd.DataFrame(columns=COLUMNS)
-    projector = registry.get(model or registry.DEFAULT)
+    projector = projector or registry.get(model or registry.DEFAULT)
     feats = build_features(targets, games, box, params)
     total = model_base.check_output(projector.predict(targets, games, box, None, params), targets)
     if projector.name == "pace_eff":

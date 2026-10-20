@@ -1,17 +1,16 @@
-"""Walk-forward parameter search, as declared in docs/RESULTS.md before it ran.
+"""The pace_eff projector's walk-forward parameter search, as declared in docs/RESULTS.md before it ran.
 
 Objective: RMSE of projected vs actual total on the training seasons'
-regular-season games, pooled. No odds are read here.
+regular-season games, pooled. No odds are read here. Lives in the model layer
+because the projector's `fit` calls it (models never import the evaluator).
 """
 
 from __future__ import annotations
 
-import itertools
-
 import numpy as np
 import pandas as pd
 
-from nbatotals import params as P
+from nbatotals import params as params_io
 from nbatotals.features.pointintime import History, build_features
 
 SHRINKAGE = (0, 2, 5, 10, 20)
@@ -34,7 +33,7 @@ def grid_size() -> int:
 
 
 def _blend_params(base: dict, blend, k) -> dict:
-    return P.with_overrides(base, {
+    return params_io.with_overrides(base, {
         "features.blend": {"l3": blend[0], "l10": blend[1], "season": blend[2]},
         "features.team_shrinkage_games": k,
     })
@@ -98,7 +97,7 @@ def search(games: pd.DataFrame, box: pd.DataFrame, base: dict, test_seasons, pro
 
 
 def params_for(base: dict, row) -> dict:
-    return P.with_overrides(base, {
+    return params_io.with_overrides(base, {
         "features.blend": {"l3": float(row["l3"]), "l10": float(row["l10"]), "season": float(row["season"])},
         "features.team_shrinkage_games": int(row["shrinkage"]),
         "projection.pace_weight": float(row["pace_weight"]),

@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from nbatotals.evaluate import dnt_gate as G
+from nbatotals.evaluate import dnt_gate
 from nbatotals.evaluate.adapters import dnt_box
 from nbatotals.teams import ALIASES, NBA_STATS_ID_TO_ALIAS
 
@@ -57,12 +57,12 @@ def test_unknown_team_id_is_refused(tmp_path):
 
 
 def test_name_normalisation_and_minutes():
-    assert G.norm_name("Luka Dončić") == G.norm_name("luka doncic")
-    assert G.norm_name("Tim Hardaway Jr.") == "tim hardaway"
-    assert G.norm_name("Kelly Oubre Jr") == G.norm_name("Kelly Oubre")
-    assert G.norm_name("Shai Gilgeous-Alexander") == "shai gilgeous alexander"
-    assert G.parse_minutes("32") == 32.0 and G.parse_minutes("12:30") == 12.5
-    assert G.parse_minutes("00") == G.parse_minutes("0:00") == G.parse_minutes(None) == G.parse_minutes("") == 0.0
+    assert dnt_gate.norm_name("Luka Dončić") == dnt_gate.norm_name("luka doncic")
+    assert dnt_gate.norm_name("Tim Hardaway Jr.") == "tim hardaway"
+    assert dnt_gate.norm_name("Kelly Oubre Jr") == dnt_gate.norm_name("Kelly Oubre")
+    assert dnt_gate.norm_name("Shai Gilgeous-Alexander") == "shai gilgeous alexander"
+    assert dnt_gate.parse_minutes("32") == 32.0 and dnt_gate.parse_minutes("12:30") == 12.5
+    assert all(dnt_gate.parse_minutes(v) == 0.0 for v in ("00", "0:00", None, ""))
 
 
 def _s(**kw):
@@ -85,7 +85,7 @@ def _s(**kw):
     ({"b_share": 0.003, "d_ot_diff": 3.0}, "gate fails (ambiguous)"),
 ])
 def test_pre_registered_decision_rule(kw, season):
-    assert G.verdicts(_s(**kw))["season"] == season
+    assert dnt_gate.verdicts(_s(**kw))["season"] == season
 
 
 def test_build_and_stats_on_a_tiny_league(tmp_path):
@@ -98,14 +98,15 @@ def test_build_and_stats_on_a_tiny_league(tmp_path):
     dnt = pd.DataFrame(rows)
     dnt = dnt.assign(date=dnt["game_id"].map(date), team=dnt["team_id"].map(NBA_STATS_ID_TO_ALIAS))
     bdl = pd.DataFrame([
-        {"game_id": gid, "game_date": "", "season": 2022, "team": t, "key": G.norm_name(f"{t} {w}"), "minutes": m}
+        {"game_id": gid, "game_date": "", "season": 2022, "team": t, "key": dnt_gate.norm_name(f"{t} {w}"),
+         "minutes": m}
         for gid, teams in {1: ("CLE", "ATL"), 3: ("CLE", "BOS")}.items() for t in teams
         for w, m in (("one", 190.0), ("two", 50.0 if gid == 1 else 0.0))])
-    d = G.build(_games(), dnt, bdl)
-    s = G.stats(d, (2022,))
+    d = dnt_gate.build(_games(), dnt, bdl)
+    s = dnt_gate.stats(d, (2022,))
     assert s["d_median"] == 240.0 and s["d_ot_diff"] == 0.0
     # game totals: projection 120 per game; actual 215 (regulation) and 245 (OT)
     assert s["c_reg_err"] == 95.0 and s["c_ot_err"] == 125.0 and s["c_delta"] == 30.0
     # p_mp >= 20 is every player-game (8); the two "two" players in the OT game played 0
     assert s["b_n"] == 8 and s["b_zero"] == 2
-    assert np.isclose(s["a_r2"], G._r2([190, 50] * 2 + [190, 0] * 2, [200, 40] * 4))
+    assert np.isclose(s["a_r2"], dnt_gate._r2([190, 50] * 2 + [190, 0] * 2, [200, 40] * 4))

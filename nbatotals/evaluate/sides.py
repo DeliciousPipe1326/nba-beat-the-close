@@ -79,7 +79,8 @@ def margin_predictions(games, box, base, projector, test_seasons=TEST_SEASONS, p
             raw_train = _margin(projector, train_t, train_games, train_box, st, base)
             h, sc = _calibrate(raw_train, margin.loc[train_t["id"]])
             raw = _margin(projector, tg, games, box, st, base).to_numpy()
-            cal[run] = (h, sc, float(np.sqrt(((raw_train.to_numpy() + h - margin.loc[train_t["id"]].to_numpy()) ** 2).mean())))
+            resid = raw_train.to_numpy() + h - margin.loc[train_t["id"]].to_numpy()
+            cal[run] = (h, sc, float(np.sqrt((resid ** 2).mean())))
             sfx = "" if run == "tuned" else "_default"
             cols[f"proj{sfx}"] = raw + h
             cols[f"p_model{sfx}"] = 1 / (1 + np.exp(-(raw + h) / sc))
@@ -136,7 +137,11 @@ def sanity(cons_sp: pd.DataFrame, cons_ml: pd.DataFrame, games: pd.DataFrame, sp
         sp_rows.append({"season": season, "anchor": anchor, "games": len(x), "books_median": float(x["books"].median()),
                         "home_spread_mean": x["home_spread"].mean(), "p_home_cover_mean": x["p_over"].mean(),
                         "mae": e.abs().mean(), "rmse": float(np.sqrt((e ** 2).mean())), "mean_error": e.mean()})
-    sp_tab = pd.DataFrame(sp_rows).sort_values(["season", "anchor"], key=lambda c: c.map(order) if c.name == "anchor" else c)
+    def by_season_anchor(rows: list) -> pd.DataFrame:
+        return pd.DataFrame(rows).sort_values(["season", "anchor"],
+                                              key=lambda c: c.map(order) if c.name == "anchor" else c)
+
+    sp_tab = by_season_anchor(sp_rows)
 
     ml = cons_ml.merge(g, on="game_id")
     ml_rows = []
@@ -145,7 +150,7 @@ def sanity(cons_sp: pd.DataFrame, cons_ml: pd.DataFrame, games: pd.DataFrame, sp
                         "p_home_mean": x["p_over"].mean(), "home_win_rate": x["home_win"].mean(),
                         "brier": metrics.brier(x["p_over"], x["home_win"]).mean(),
                         "log_loss": metrics.log_loss(x["p_over"], x["home_win"]).mean()})
-    ml_tab = pd.DataFrame(ml_rows).sort_values(["season", "anchor"], key=lambda c: c.map(order) if c.name == "anchor" else c)
+    ml_tab = by_season_anchor(ml_rows)
 
     tc = cons_sp[cons_sp["anchor"] == spec.ref][["game_id", "home_spread"]].merge(
         cons_ml[cons_ml["anchor"] == spec.ref][["game_id", "p_over"]], on="game_id").merge(g, on="game_id")
@@ -182,10 +187,10 @@ def sanity(cons_sp: pd.DataFrame, cons_ml: pd.DataFrame, games: pd.DataFrame, sp
 # --------------------------------------------------------------------------- spreads
 
 def pinnacle_spreads(pred, odds, base, spec=SPREADS) -> pd.DataFrame:
-    from nbatotals import params as P
+    from nbatotals import params as params_io
 
     pin = odds[(odds["book"] == "pinnacle") & (odds["anchor"] == spec.ref)]
-    cons = market.consensus_spreads(pin, P.with_overrides(base, {"market.min_books": 1}))
+    cons = market.consensus_spreads(pin, params_io.with_overrides(base, {"market.min_books": 1}))
     bets = backtest._bets(pred, market.wide(cons), spec.ref, "proj", spec)
     rows = []
     for t in backtest.THRESHOLDS:
@@ -202,7 +207,8 @@ def run_spreads(pred, fits, odds, games, base, sane: dict, spec=SPREADS) -> dict
     w = market.wide(cons)
     g = backtest.grading(pred, w, spec)
     raw = backtest._bets(pred, w, spec.ref, "proj_raw", spec)
-    raw_rows = [{"season": s, **_grade((raw if s == "pooled" else raw[raw["season"] == s]).query("edge != 0"), spec.ref, spec)}
+    raw_rows = [{"season": s, **_grade((raw if s == "pooled" else raw[raw["season"] == s]).query("edge != 0"),
+                                       spec.ref, spec)}
                 for s in SEASONS]
     d = pred.merge(w, on="game_id")
     d = d[d[f"line_{spec.ref}"].notna()]
@@ -315,10 +321,10 @@ def evidence_h2h(g: pd.DataFrame, sc: pd.DataFrame, spec=H2H) -> dict:
 
 
 def pinnacle_h2h(pred, odds, base, spec=H2H) -> dict:
-    from nbatotals import params as P
+    from nbatotals import params as params_io
 
     pin = odds[(odds["book"] == "pinnacle") & (odds["anchor"] == spec.ref)]
-    w = market.wide(market.consensus_h2h(pin, P.with_overrides(base, {"market.min_books": 1})))
+    w = market.wide(market.consensus_h2h(pin, params_io.with_overrides(base, {"market.min_books": 1})))
     bets = _bets_h2h(pred, w, spec.ref, "p_model", spec)
     rows = []
     for t in H2H_THRESHOLDS:
@@ -363,9 +369,12 @@ def sanity_markdown(sane: dict, labels: dict) -> str:
     fav = _table(["season", "games (spread ≠ 0)", "spread favourite = moneyline favourite"],
                  [[r.season if r.season == "all" else season_label(r.season), f"{r.games:,}", f"{r.agreement:.4f}"]
                   for r in sane["favourite"].itertuples()])
-    pair = lambda df, d: _table(["earlier bucket", "season", "games with both", "earlier − true close (95% CI)"],
-                                [[r.anchor, r.season if r.season == "all" else season_label(r.season), f"{r.games:,}",
-                                  f"{r.diff:+.{d}f} ({r.lo:+.{d}f} to {r.hi:+.{d}f})"] for r in df.itertuples()])
+
+    def pair(df, d):
+        return _table(["earlier bucket", "season", "games with both", "earlier − true close (95% CI)"],
+                      [[r.anchor, r.season if r.season == "all" else season_label(r.season), f"{r.games:,}",
+                        f"{r.diff:+.{d}f} ({r.lo:+.{d}f} to {r.hi:+.{d}f})"] for r in df.itertuples()])
+
     checks = _table(["stop rule (grading proceeds only if every row passes)", "value", "passes"],
                     [[k, v, "yes" if ok else "**NO**"] for k, (v, ok) in sane["checks"].items()])
     return "\n\n".join([
@@ -373,7 +382,8 @@ def sanity_markdown(sane: dict, labels: dict) -> str:
         "### Spreads consensus by bucket (scored games, 2021-22 to 2024-25)", sp,
         "### Moneyline consensus by bucket", ml,
         "### Cross-market: favourite agreement at the true close", fav,
-        "### Spread MAE vs actual margin, paired: earlier bucket minus true close (same games)", pair(sane["mae_pairs"], 3),
+        "### Spread MAE vs actual margin, paired: earlier bucket minus true close (same games)",
+        pair(sane["mae_pairs"], 3),
         "### Moneyline log loss, paired: earlier bucket minus true close (same games)", pair(sane["ll_pairs"], 4),
     ])
 
@@ -387,7 +397,8 @@ def fit_markdown(fits: pd.DataFrame) -> str:
                f"{int(r['test_n']):,}"] for _, r in fits.iterrows()]
     return _table(["test season", "trained on", "train n"] + [c.replace("_", " ") for c in extra]
                   + ["h (tuned)", "logistic scale s (tuned)", "train margin RMSE", "h (default)", "s (default)",
-                     "test margin MAE (tuned)", "test margin RMSE (tuned)", "test margin MAE (default)", "test n"], rows)
+                     "test margin MAE (tuned)", "test margin RMSE (tuned)", "test margin MAE (default)", "test n"],
+                  rows)
 
 
 def _counts(res: dict) -> str:
@@ -420,7 +431,8 @@ def spreads_report(res: dict) -> str:
         "## Anchor construction counts", _counts(res),
         "## Market sanity (before grading)", sanity_markdown(res["sanity"], spec.labels),
         "## Walk-forward fit (margin calibration on earlier seasons only)", fit_markdown(res["fits"]),
-        f"Correlation of the model margin with the true-close implied margin: {r:+.3f} ({lo:+.3f}, {hi:+.3f}), n = {n:,}.",
+        f"Correlation of the model margin with the true-close implied margin: {r:+.3f} ({lo:+.3f}, {hi:+.3f}), "
+        f"n = {n:,}.",
         f"## Headline (primary cell: tuned model, {spec.labels[spec.ref]}, every game)", backtest.headline_table(res),
         "### Secondary: raw margin without the fitted home-court constant (h = 0)", raw,
         f"## CLV by anchor (tuned model, every game, all bets), measured to {spec.labels[spec.ref]}",
@@ -447,14 +459,16 @@ def _scores_table(sc: pd.DataFrame) -> str:
                    "log loss model", "log loss market", "log loss model − market (95% CI)"],
                   [[x.model, season_label(x.season), f"{x.n:,}", f"{x.brier_model:.4f}", f"{x.brier_market:.4f}",
                     f"{x.brier_diff:+.4f} ({x.brier_lo:+.4f} to {x.brier_hi:+.4f})", f"{x.log_loss_model:.4f}",
-                    f"{x.log_loss_market:.4f}", f"{x.log_loss_diff:+.4f} ({x.log_loss_lo:+.4f} to {x.log_loss_hi:+.4f})"]
+                    f"{x.log_loss_market:.4f}",
+                    f"{x.log_loss_diff:+.4f} ({x.log_loss_lo:+.4f} to {x.log_loss_hi:+.4f})"]
                    for x in sc.itertuples()])
 
 
 def _logit_table(r: pd.DataFrame, ref_label: str) -> str:
     return _table(["model run", "season", "n", "intercept (95% CI)", f"market logit, {ref_label} (95% CI)",
                    "model logit (95% CI)"],
-                  [[x.run, season_label(x.season), f"{x.n:,}", f"{x.const_coef:+.3f} ({x.const_lo:+.3f}, {x.const_hi:+.3f})",
+                  [[x.run, season_label(x.season), f"{x.n:,}",
+                    f"{x.const_coef:+.3f} ({x.const_lo:+.3f}, {x.const_hi:+.3f})",
                     f"{x.market_coef:.3f} ({x.market_lo:.3f}, {x.market_hi:.3f})",
                     f"{x.model_coef:+.3f} ({x.model_lo:+.3f}, {x.model_hi:+.3f})"] for x in r.itertuples()])
 
@@ -478,7 +492,8 @@ def h2h_headline(res: dict) -> str:
     sc = res["scores"]
     rows = []
     for s in SEASONS:
-        c = g[(g.run == "tuned") & (g.anchor == spec.ref) & (g.cut == "all") & (g.threshold == 0) & (g.season == s)].iloc[0]
+        primary = (g.run == "tuned") & (g.cut == "all") & (g.threshold == 0) & (g.season == s)
+        c = g[primary & (g.anchor == spec.ref)].iloc[0]
         x = sc[(sc.model == "p_model") & (sc.season == s)].iloc[0]
         row = [season_label(s), f"{int(c.n):,}", f"{x.log_loss_model:.4f} vs {x.log_loss_market:.4f}",
                f"{x.log_loss_diff:+.4f} ({x.log_loss_lo:+.4f} to {x.log_loss_hi:+.4f})",
@@ -486,7 +501,7 @@ def h2h_headline(res: dict) -> str:
                f"{_pct(c.fair_roi)} ({_pct(c.fair_lo)} to {_pct(c.fair_hi)})",
                f"{_pct(c.real_roi)} ({_pct(c.real_lo)} to {_pct(c.real_hi)})"]
         for a in spec.headline_clv:
-            o = g[(g.run == "tuned") & (g.anchor == a) & (g.cut == "all") & (g.threshold == 0) & (g.season == s)].iloc[0]
+            o = g[primary & (g.anchor == a)].iloc[0]
             row += [f"{o.clv_cents:+.2f}¢ ({o.clv_cents_lo:+.2f} to {o.clv_cents_hi:+.2f})"]
         rows.append(row)
     head = ["season", "bets", "log loss model vs market", "difference (95% CI)", "win rate (95% Wilson)",
@@ -497,7 +512,7 @@ def h2h_headline(res: dict) -> str:
 
 def h2h_report(res: dict) -> str:
     spec = res["spec"]
-    L = spec.labels
+    labels = spec.labels
     g = res["grading"]
     ev = res["evidence"]
     bet_head = ["anchor", "edge >", "season", "n", "win rate (95% Wilson)", "baseline", "fair ROI (CI)",
@@ -505,12 +520,15 @@ def h2h_report(res: dict) -> str:
     clv = g[(g.run == "tuned") & (g.cut == "all") & (g.threshold == 0) & (g.anchor != spec.ref)]
     thr = g[(g.run == "tuned") & (g.cut == "all") & (g.anchor == spec.ref)]
     sba = res["scores_by_anchor"]
-    by_anchor = _table(["market at", "n", "log loss model", "log loss market", "model − market (95% CI)", "Brier market"],
-                       [[L[x.anchor], f"{x.n:,}", f"{x.log_loss_model:.4f}", f"{x.log_loss_market:.4f}",
-                         f"{x.log_loss_diff:+.4f} ({x.log_loss_lo:+.4f} to {x.log_loss_hi:+.4f})", f"{x.brier_market:.4f}"]
+    by_anchor = _table(["market at", "n", "log loss model", "log loss market", "model − market (95% CI)",
+                        "Brier market"],
+                       [[labels[x.anchor], f"{x.n:,}", f"{x.log_loss_model:.4f}", f"{x.log_loss_market:.4f}",
+                         f"{x.log_loss_diff:+.4f} ({x.log_loss_lo:+.4f} to {x.log_loss_hi:+.4f})",
+                         f"{x.brier_market:.4f}"]
                         for x in sba.itertuples()])
     flagged = ev["cells_clearing_a_bar"]
-    flagged_rows = [[x.run, L[x.anchor], x.cut, f"{100 * x.threshold:.0f}%", season_label(x.season), f"{int(x.n):,}",
+    flagged_rows = [[x.run, labels[x.anchor], x.cut, f"{100 * x.threshold:.0f}%", season_label(x.season),
+                     f"{int(x.n):,}",
                      f"{_pct(x.real_roi)} (lo {_pct(x.real_lo)})",
                      "n/a" if pd.isna(x.clv_cents) else f"{x.clv_cents:+.2f}¢ (lo {x.clv_cents_lo:+.2f})"]
                     for x in flagged.itertuples()]
@@ -519,33 +537,36 @@ def h2h_report(res: dict) -> str:
         "Probabilities are the home team's; a bet is on home if the model's probability is above the market's "
         "devigged probability, away if below.",
         "## Anchor construction counts", _counts(res),
-        "## Market sanity (before grading)", sanity_markdown(res["sanity"], L),
+        "## Market sanity (before grading)", sanity_markdown(res["sanity"], labels),
         "## Walk-forward fit (margin calibration on earlier seasons only)", fit_markdown(res["fits"]),
-        f"## Headline (primary cell: tuned model, {L[spec.ref]}, every game with a non-zero edge)", h2h_headline(res),
-        f"## Probability scores against the {L[spec.ref]} consensus", _scores_table(res["scores"]),
+        f"## Headline (primary cell: tuned model, {labels[spec.ref]}, every game with a non-zero edge)",
+        h2h_headline(res),
+        f"## Probability scores against the {labels[spec.ref]} consensus", _scores_table(res["scores"]),
         "### Model vs the market at each bucket (pooled, tuned)", by_anchor,
-        f"## Market + model blend: logistic regression of home win on logit(market) and logit(model)",
-        _logit_table(res["regression"], L[spec.ref]),
-        f"## Betting the side the model favours at {L[spec.ref]}, by threshold (tuned, every game)",
-        _table(bet_head, _bets_rows(thr, L, spec.ref)),
-        f"## CLV by anchor (tuned, every game, threshold 0), measured to {L[spec.ref]}",
-        _table(bet_head, _bets_rows(clv, L, spec.ref)),
+        "## Market + model blend: logistic regression of home win on logit(market) and logit(model)",
+        _logit_table(res["regression"], labels[spec.ref]),
+        f"## Betting the side the model favours at {labels[spec.ref]}, by threshold (tuned, every game)",
+        _table(bet_head, _bets_rows(thr, labels, spec.ref)),
+        f"## CLV by anchor (tuned, every game, threshold 0), measured to {labels[spec.ref]}",
+        _table(bet_head, _bets_rows(clv, labels, spec.ref)),
     ]
     if "pinnacle" in res:
         p = res["pinnacle"]
-        parts += [f"## Pinnacle only: tuned model against Pinnacle's own {L[spec.ref]} devigged probability and price",
-                  _scores_table(p["scores"]), _logit_table(p["regression"], "Pinnacle " + L[spec.ref]),
-                  _table(bet_head[1:-1], _bets_rows(p["bets"], L, spec.ref, with_anchor=False))]
+        parts += [f"## Pinnacle only: tuned model against Pinnacle's own {labels[spec.ref]} devigged probability "
+                  "and price",
+                  _scores_table(p["scores"]), _logit_table(p["regression"], "Pinnacle " + labels[spec.ref]),
+                  _table(bet_head[1:-1], _bets_rows(p["bets"], labels, spec.ref, with_anchor=False))]
     parts += [
         "## Pre-registered evidence bar", _bars(ev),
         "## Cells clearing a bar (real ROI lower bound above 0 or CLV lower bound above 0)",
         _table(["run", "anchor", "cut", "edge >", "season", "n", "real ROI", "CLV cents"], flagged_rows)
         if flagged_rows else "None.",
-        "## All cells, tuned model, every game", _table(bet_head, _bets_rows(g[(g.run == "tuned") & (g.cut == "all")], L, spec.ref)),
+        "## All cells, tuned model, every game",
+        _table(bet_head, _bets_rows(g[(g.run == "tuned") & (g.cut == "all")], labels, spec.ref)),
         "## All cells, tuned model, both teams 10+ games",
-        _table(bet_head, _bets_rows(g[(g.run == "tuned") & (g.cut == "both_10")], L, spec.ref)),
+        _table(bet_head, _bets_rows(g[(g.run == "tuned") & (g.cut == "both_10")], labels, spec.ref)),
         "## All cells, default parameters, every game",
-        _table(bet_head, _bets_rows(g[(g.run == "default") & (g.cut == "all")], L, spec.ref)),
+        _table(bet_head, _bets_rows(g[(g.run == "default") & (g.cut == "all")], labels, spec.ref)),
     ]
     return "\n\n".join(parts) + "\n"
 

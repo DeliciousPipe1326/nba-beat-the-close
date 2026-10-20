@@ -8,9 +8,9 @@ import pytest
 
 pytest.importorskip("pyarrow")  # the private lake is parquet; synthetic files mirror it
 
-from nbatotals import params as P
+from nbatotals import params as params_io
 from nbatotals.evaluate import leakage
-from nbatotals.evaluate.adapters import legacy_players as LP
+from nbatotals.evaluate.adapters import legacy_players
 from nbatotals.features import players
 from nbatotals.features.players import PlayerInputs
 from nbatotals.model import lineup_pace_eff
@@ -25,7 +25,7 @@ def league():
 
 @pytest.fixture(scope="module")
 def prm():
-    return P.load()
+    return params_io.load()
 
 
 @pytest.fixture(scope="module")
@@ -42,9 +42,10 @@ def _truncate(src_dnt, src_epm, dst, date, dnt_game_id):
         if d.name < date:
             shutil.copytree(d, dnt_dir / d.name)
         elif d.name == date:
-            rows = pd.read_json(d / LP.DNT_BOX_FILE)
+            rows = pd.read_json(d / legacy_players.DNT_BOX_FILE)
             (dnt_dir / d.name).mkdir(parents=True)
-            rows[rows["game_id"] == dnt_game_id].to_json(dnt_dir / d.name / LP.DNT_BOX_FILE, orient="records")
+            target = dnt_dir / d.name / legacy_players.DNT_BOX_FILE
+            rows[rows["game_id"] == dnt_game_id].to_json(target, orient="records")
     for f in src_epm.glob("season=*/*.parquet"):
         if f.stem > date:
             continue
@@ -62,7 +63,7 @@ def test_external_file_truncation(league, prm, folders, tmp_path, state):
     games, box = league
     sample = leakage.stratified_sample(games, per_cell=4, seed=1)
     assert sample["season"].nunique() == 2 and len(sample) >= 30
-    full = LineupPaceEff(PlayerInputs.from_folders(*folders)).predict(sample, games, box, state, prm)
+    full = LineupPaceEff(legacy_players.player_inputs(*folders)).predict(sample, games, box, state, prm)
     full = full.set_index("game_id")["total_proj"]
     box_dates = box.merge(games[["id", "game_date"]], left_on="game_id", right_on="id")["game_date"]
     mismatches = []
@@ -71,7 +72,7 @@ def test_external_file_truncation(league, prm, folders, tmp_path, state):
         keep_games = games[games["game_date"] < target.game_date]
         keep_box = box[(box_dates < target.game_date).to_numpy()]
         blind = pd.DataFrame([target._asdict()]).assign(home_pts=np.nan, away_pts=np.nan)
-        cut = LineupPaceEff(PlayerInputs.from_folders(*dirs)).predict(blind, keep_games, keep_box, state, prm)
+        cut = LineupPaceEff(legacy_players.player_inputs(*dirs)).predict(blind, keep_games, keep_box, state, prm)
         if cut["total_proj"].iloc[0] != full.loc[target.id]:
             mismatches.append((target.id, full.loc[target.id], cut["total_proj"].iloc[0]))
     assert mismatches == []
@@ -88,14 +89,14 @@ def test_external_truncation_catches_a_leaky_reference(league, prm, folders, tmp
     monkeypatch.setattr(lineup_pace_eff, "_references", leaky)
     sample = leakage.stratified_sample(games, per_cell=2, seed=4)
     sample = sample[sample["phase"] == "mid"].head(3)
-    full = LineupPaceEff(PlayerInputs.from_folders(*folders)).predict(sample, games, box, None, prm)
+    full = LineupPaceEff(legacy_players.player_inputs(*folders)).predict(sample, games, box, None, prm)
     full = full.set_index("game_id")["total_proj"]
     box_dates = box.merge(games[["id", "game_date"]], left_on="game_id", right_on="id")["game_date"]
     caught = 0
     for i, target in enumerate(sample.itertuples(index=False)):
         dirs = _truncate(*folders, tmp_path / str(i), target.game_date, 9_000_000 + target.id)
         blind = pd.DataFrame([target._asdict()]).assign(home_pts=np.nan, away_pts=np.nan)
-        cut = LineupPaceEff(PlayerInputs.from_folders(*dirs)).predict(
+        cut = LineupPaceEff(legacy_players.player_inputs(*dirs)).predict(
             blind, games[games["game_date"] < target.game_date], box[(box_dates < target.game_date).to_numpy()],
             None, prm)
         caught += cut["total_proj"].iloc[0] != full.loc[target.id]
@@ -142,6 +143,9 @@ def test_lineup_information_moves_the_projection(league, prm):
     dnt2.loc[(dnt2["game_id"] == gid) & dnt2["player_id"].isin(top), "p_mp"] = 0.0
     inp2 = PlayerInputs(dnt2, inp.ratings)
     out = LineupPaceEff(inp2).predict(target, games, box, None, prm)["total_proj"].iloc[0]
-    o = lambda t: t[(t["dnt_game_id"] == gid) & (t["team"] == home)]["O"].iloc[0]
+
+    def o(t):
+        return t[(t["dnt_game_id"] == gid) & (t["team"] == home)]["O"].iloc[0]
+
     assert o(inp2.team_values()) < o(tv)
     assert out != base

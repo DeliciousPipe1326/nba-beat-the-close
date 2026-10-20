@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from nbatotals import cli, store, today
-from nbatotals import params as P
+from nbatotals import params as params_io
 from tests.fixtures import synthetic
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,7 +35,7 @@ def filled(tmp_path):
 
 def test_today_csv(filled, tmp_path):
     con, db, day = filled
-    df = today.build(con, day, P.load())
+    df = today.build(con, day, params_io.load())
     assert list(df.columns) == today.COLUMNS and len(df) == 2
     bos = df[df.home == "BOS"].iloc[0]
     assert bos.market_line == 222.0 and bos.books == 3 and bos.market_anchor == "close"

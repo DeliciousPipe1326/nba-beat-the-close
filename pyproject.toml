@@ -8,7 +8,7 @@ requires-python = ">=3.10"
 dependencies = ["numpy>=1.26", "pandas>=2.1", "pyyaml>=6", "requests>=2.31"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pyarrow>=14"]
+dev = ["pytest>=8", "pyarrow>=14", "ruff>=0.6", "mypy>=1.10", "radon>=6"]
 legacy = ["pyarrow>=14"]  # maintainer-only: reads the private parquet lake (Experiment 2)
 
 [tool.setuptools.packages.find]
@@ -16,3 +16,24 @@ include = ["nbatotals*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = [".claude"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP", "SIM", "N", "C90"]
+
+[tool.ruff.lint.mccabe]
+# The complexity budget (docs/CODE_QUALITY.md): radon grade C or better, i.e. at most 15.
+max-complexity = 15
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+check_untyped_defs = true
+# tests/ imports its fixtures as the package "tests.fixtures"; resolve modules from the repo root.
+explicit_package_bases = true
+files = ["nbatotals", "tests"]
+exclude = ["^\\.claude/"]

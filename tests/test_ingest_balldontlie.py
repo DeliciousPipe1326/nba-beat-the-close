@@ -1,7 +1,7 @@
 import pytest
 
 from nbatotals import boxscore, store
-from nbatotals import params as P
+from nbatotals import params as params_io
 from nbatotals.ingest import balldontlie, dunksandthrees
 from nbatotals.ingest import common
 from tests.fixtures.api_payloads import FAKE_BDL_KEY, FakeResponse, FakeSession, bdl_game, bdl_stat
@@ -14,7 +14,7 @@ def con(tmp_path):
 
 def client(routes, waits=None):
     session = FakeSession(routes)
-    c = balldontlie.Client(P.load(), session=session, key=FAKE_BDL_KEY,
+    c = balldontlie.Client(params_io.load(), session=session, key=FAKE_BDL_KEY,
                            sleep=(waits.append if waits is not None else (lambda s: None)))
     return c, session
 
@@ -62,7 +62,8 @@ def test_injuries_and_no_key_in_store(con):
     assert balldontlie.ingest_injuries(con, c) == 1
     row = con.execute("SELECT team, player_name, status FROM injuries").fetchone()
     assert row == ("BOS", "Test Player", "Out")
-    dump = " ".join(str(v) for t in ("games", "injuries", "api_usage") for r in con.execute(f"SELECT * FROM {t}") for v in r)
+    dump = " ".join(str(v) for t in ("games", "injuries", "api_usage")
+                    for r in con.execute(f"SELECT * FROM {t}") for v in r)
     assert FAKE_BDL_KEY not in dump
 
 
@@ -72,5 +73,5 @@ def test_tier_b_stub_is_explicit(monkeypatch):
         dunksandthrees.fetch_player_epm()
     monkeypatch.delenv(dunksandthrees.KEY_VAR)
     monkeypatch.setattr(common, "read_dotenv", lambda path=None: {})
-    with pytest.raises(common.MissingKey):
+    with pytest.raises(common.MissingKeyError):
         dunksandthrees.fetch_player_epm()

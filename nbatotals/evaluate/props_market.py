@@ -131,7 +131,8 @@ def prepare(raw: pd.DataFrame, games: pd.DataFrame) -> tuple[pd.DataFrame, dict]
     r = r[~dup].drop(columns="_ro")
 
     # game join: US Eastern tip date and team names
-    r["tip_date"] = pd.to_datetime(r["commence_utc"], utc=True).dt.tz_convert("America/New_York").dt.strftime("%Y-%m-%d")
+    tip = pd.to_datetime(r["commence_utc"], utc=True)
+    r["tip_date"] = tip.dt.tz_convert("America/New_York").dt.strftime("%Y-%m-%d")
     r["home"] = r["home_name"].map(FULL_NAME_TO_ALIAS)
     r["away"] = r["away_name"].map(FULL_NAME_TO_ALIAS)
     g = games[["id", "game_date", "home", "away", "season", "postseason"]].rename(columns={"id": "game_id"})
@@ -357,7 +358,8 @@ def distance_table(quotes: pd.DataFrame, fair: pd.DataFrame, pairs: pd.DataFrame
                             values=["price", "p_over_fair"], aggfunc="first")
         row = {"region": region, "book": book, "window": window, "pinnacle_player_lines": len(nearest),
                "same_line_share": float((nearest == 0).mean()) if len(nearest) else np.nan,
-               "mean_abs_line_diff_when_different": float(nearest[nearest > 0].mean()) if (nearest > 0).any() else np.nan,
+               "mean_abs_line_diff_when_different": (float(nearest[nearest > 0].mean()) if (nearest > 0).any()
+                                                     else np.nan),
                "same_line_sides": len(p)}
         if len(two) and ("price", "over") in two and ("price", "under") in two:
             t = two.dropna(subset=[("price", "over"), ("price", "under")])
@@ -365,7 +367,8 @@ def distance_table(quotes: pd.DataFrame, fair: pd.DataFrame, pairs: pd.DataFrame
             pb = devig_over(po, pu)
             pf = t[("p_over_fair", "over")]
             row |= {"two_sided_same_line": len(t), "hold": float((1 / po + 1 / pu - 1).mean()),
-                    "mean_p_over_minus_pin": float((pb - pf).mean()), "mean_abs_p_over_minus_pin": float(np.abs(pb - pf).mean())}
+                    "mean_p_over_minus_pin": float((pb - pf).mean()),
+                    "mean_abs_p_over_minus_pin": float(np.abs(pb - pf).mean())}
         for side in ("over", "under"):
             e = p.loc[p["side"] == side, "edge"]
             row[f"share_edge_2pct_{side}"] = float((e >= 0.02).mean()) if len(e) else np.nan
@@ -392,17 +395,21 @@ def totals_benchmark(tq: pd.DataFrame, games: pd.DataFrame, buckets=("early_even
     g = games[(games["season"] == TEST_SEASON) & (games["postseason"] == 0) & (games["game_date"] <= LAST_REGULAR_DAY)]
     q = tq[tq["game_id"].isin(set(g["id"])) & tq["anchor"].isin(buckets)]
     pin = q[q["book"] == FAIR_BOOK][["game_id", "anchor", "line", "over_price", "under_price"]]
-    pin = pin.assign(p_over_fair=devig_over(pin["over_price"], pin["under_price"]))[["game_id", "anchor", "line", "p_over_fair"]]
+    pin = pin.assign(p_over_fair=devig_over(pin["over_price"], pin["under_price"]))
+    pin = pin[["game_id", "anchor", "line", "p_over_fair"]]
     m = q[q["book"] != FAIR_BOOK].merge(pin, on=["game_id", "anchor", "line"])
     sides = pd.concat([
         pd.DataFrame({"anchor": m["anchor"], "side": "over", "edge": edge(m["p_over_fair"], m["over_price"])}),
         pd.DataFrame({"anchor": m["anchor"], "side": "under", "edge": edge(1 - m["p_over_fair"], m["under_price"])}),
     ])
+    def shares(x: pd.DataFrame) -> dict:
+        return {f">= {t:.0%}": float((x["edge"] >= t).mean()) for t in THRESHOLDS}
+
     rows = []
     for (a, s), x in sides.groupby(["anchor", "side"]):
-        rows.append({"bucket": a, "side": s, "sides": len(x)} | {f">= {t:.0%}": float((x["edge"] >= t).mean()) for t in THRESHOLDS})
+        rows.append({"bucket": a, "side": s, "sides": len(x)} | shares(x))
     for a, x in sides.groupby("anchor"):
-        rows.append({"bucket": a, "side": "both", "sides": len(x)} | {f">= {t:.0%}": float((x["edge"] >= t).mean()) for t in THRESHOLDS})
+        rows.append({"bucket": a, "side": "both", "sides": len(x)} | shares(x))
     return pd.DataFrame(rows).sort_values(["bucket", "side"]).reset_index(drop=True)
 
 
@@ -411,11 +418,13 @@ def pinnacle_calibration(settled_pin: pd.DataFrame) -> pd.DataFrame:
     rows = []
     s = settled_pin[settled_pin["result"].isin(["win", "loss"])]
     for window, x in s.groupby("window"):
-        for lab, y in [("all", x)] + [(str(b), z) for b, z in x.groupby(pd.cut(x["p_over_fair"], [0, .4, .45, .5, .55, .6, 1]), observed=True)]:
+        bins = x.groupby(pd.cut(x["p_over_fair"], [0, .4, .45, .5, .55, .6, 1]), observed=True)
+        for lab, y in [("all", x)] + [(str(b), z) for b, z in bins]:
             w = int((y["result"] == "win").sum())
             lo, hi = metrics.wilson(w, len(y))
-            rows.append({"window": window, "p_over bin": lab, "n": len(y), "mean p_over": float(y["p_over_fair"].mean()),
-                         "over hit rate": w / len(y), "lo": lo, "hi": hi})
+            rows.append({"window": window, "p_over bin": lab, "n": len(y),
+                         "mean p_over": float(y["p_over_fair"].mean()), "over hit rate": w / len(y),
+                         "lo": lo, "hi": hi})
     return pd.DataFrame(rows)
 
 
@@ -433,7 +442,8 @@ def unchanged_to_close(pairs: pd.DataFrame, quotes: pd.DataFrame) -> pd.DataFram
     """Descriptive, added after pre-registration (the last_update rule cannot detect staleness here):
     for T−3h bets, does the same book quote the same line and side at the close, and at an unchanged price?"""
     k = ["book", "event_id", "market", "player", "line", "side"]
-    close = quotes[quotes["window"] == "close"][k + ["price"]].drop_duplicates(k).rename(columns={"price": "close_price"})
+    close = quotes[quotes["window"] == "close"][k + ["price"]].drop_duplicates(k)
+    close = close.rename(columns={"price": "close_price"})
     rows = []
     for t in THRESHOLDS:
         b = pairs[(pairs["window"] == "t-3h") & (pairs["edge"] >= t) & pairs["result"].isin(["win", "loss"])]
@@ -441,7 +451,8 @@ def unchanged_to_close(pairs: pd.DataFrame, quotes: pd.DataFrame) -> pd.DataFram
         for side, x in [("both", b)] + list(b.groupby("side")):
             h = x["close_price"].notna()
             u = h & (x["close_price"] == x["price"])
-            rows.append({"threshold": f">= {t:.0%}", "side": side, "bets": len(x), "same line at close": float(h.mean()),
+            rows.append({"threshold": f">= {t:.0%}", "side": side, "bets": len(x),
+                         "same line at close": float(h.mean()),
                          "price unchanged (of those)": float(u.sum() / h.sum()) if h.any() else np.nan,
                          "ROI, unchanged": float(x.loc[u, "profit"].mean()) if u.any() else np.nan,
                          "ROI, changed": float(x.loc[h & ~u, "profit"].mean()) if (h & ~u).any() else np.nan})
@@ -458,29 +469,41 @@ def _ci(lo, hi, d=1):
     return "" if pd.isna(lo) else f"{100 * lo:+.{d}f} to {100 * hi:+.{d}f}"
 
 
-def _cell_md(tab: pd.DataFrame, clv: bool = True, max_rows: int | None = None) -> str:
-    if not len(tab):
-        return "_no bets_\n"
-    thr = "threshold" in tab.columns
-    head = ("| edge ≥ " if thr else "") + "| region | book | window | n | mean paper edge | realised ROI (95% CI) | hit rate (95% Wilson) | mean p_fair |"
+def _cell_header(thr: bool, clv: bool) -> list[str]:
+    head = (("| edge ≥ " if thr else "") + "| region | book | window | n | mean paper edge | realised ROI (95% CI) | "
+            "hit rate (95% Wilson) | mean p_fair |")
     sep = ("|---" if thr else "") + "|---|---|---|---|---|---|---|---|"
     if clv:
         head += " CLV, prob. points (95% CI) [n] | Pinnacle line moved towards bet |"
         sep += "---|---|"
-    lines = [head, sep]
+    return [head, sep]
+
+
+def _clv_cells(r: dict) -> str:
+    """The two CLV columns: only T−3h bets have a later Pinnacle quote to compare with."""
+    if r["window"] == "t-3h" and r.get("clv_n", 0):
+        s = f" {100 * r['clv']:+.2f} ({100 * r['clv_lo']:+.2f} to {100 * r['clv_hi']:+.2f}) [{r['clv_n']:,}] |"
+    else:
+        s = " n/a |"
+    return s + (f" {_pct(r['line_moved_toward'], 0)} of {r['line_moved_n']:,} |"
+                if r["window"] == "t-3h" and r.get("line_moved_n", 0) else " |")
+
+
+def _cell_row(r: dict, thr: bool, clv: bool) -> str:
+    s = (f"| {r['threshold']:.0%} " if thr else "") + (
+        f"| {r['region']} | {r['book']} | {WINDOW_LABELS[r['window']]} | {r['n']:,} | {_pct(r['mean_edge'])} | "
+        f"{_pct(r['roi'])} ({_ci(r['roi_lo'], r['roi_hi'])}) | "
+        f"{_pct(r['hit'])} ({_pct(r['hit_lo'])}–{_pct(r['hit_hi'])}) | "
+        f"{_pct(r['p_fair_mean'])} |")
+    return s + _clv_cells(r) if clv else s
+
+
+def _cell_md(tab: pd.DataFrame, clv: bool = True, max_rows: int | None = None) -> str:
+    if not len(tab):
+        return "_no bets_\n"
+    thr = "threshold" in tab.columns
     t = tab if max_rows is None else tab.head(max_rows)
-    for r in t.to_dict("records"):
-        s = (f"| {r['threshold']:.0%} " if thr else "") + (f"| {r['region']} | {r['book']} | {WINDOW_LABELS[r['window']]} | {r['n']:,} | {_pct(r['mean_edge'])} | "
-             f"{_pct(r['roi'])} ({_ci(r['roi_lo'], r['roi_hi'])}) | {_pct(r['hit'])} ({_pct(r['hit_lo'])}–{_pct(r['hit_hi'])}) | "
-             f"{_pct(r['p_fair_mean'])} |")
-        if clv:
-            if r["window"] == "t-3h" and r.get("clv_n", 0):
-                s += f" {100 * r['clv']:+.2f} ({100 * r['clv_lo']:+.2f} to {100 * r['clv_hi']:+.2f}) [{r['clv_n']:,}] |"
-            else:
-                s += " n/a |"
-            s += (f" {_pct(r['line_moved_toward'], 0)} of {r['line_moved_n']:,} |"
-                  if r["window"] == "t-3h" and r.get("line_moved_n", 0) else " |")
-        lines.append(s)
+    lines = _cell_header(thr, clv) + [_cell_row(r, thr, clv) for r in t.to_dict("records")]
     if max_rows is not None and len(tab) > max_rows:
         lines.append(f"\n_{len(tab) - max_rows} smaller rows in the full report._")
     return "\n".join(lines) + "\n"
@@ -544,19 +567,22 @@ def run(raw: pd.DataFrame, read_counts: dict, games: pd.DataFrame, box: pd.DataF
     return res
 
 
-def report_markdown(res: dict, sensitivity: dict | None = None) -> str:
-    c = res["counts"]
-    out = ["# Experiment 4: player props against Pinnacle (generated report)\n",
-           "Generated by `python -m nbatotals backtest-props --legacy`. Rules: "
-           "[PREREGISTRATION.md](PREREGISTRATION.md). Interpretation: [RESULTS.md](RESULTS.md). "
-           "Test set: 2024-25 regular season. ROI and CLV intervals: bootstrap over events (games), "
-           f"{metrics.N_BOOT:,} resamples, seed {metrics.SEED}. Hit-rate intervals are Wilson and treat bets as "
-           "independent (too narrow for pooled 'all books' rows, where one prop is bet at several books). "
-           "CLV is in probability points (Pinnacle close minus Pinnacle T−3h, same line).\n"]
-    out.append("## Data counts\n")
-    out.append("```\n" + _json(c) + "\n```\n")
-    out.append("T−3h CLV status of same-line sides: " + ", ".join(f"{k}: {v:,}" for k, v in res["clv_status"].items()) + "\n")
-    out.append("\n## Pre-registered cells (markets and sides pooled)\n")
+def _intro(res: dict) -> list[str]:
+    status = ", ".join(f"{k}: {v:,}" for k, v in res["clv_status"].items())
+    return ["# Experiment 4: player props against Pinnacle (generated report)\n",
+            "Generated by `python -m nbatotals backtest-props --legacy`. Rules: "
+            "[PREREGISTRATION.md](PREREGISTRATION.md). Interpretation: [RESULTS.md](RESULTS.md). "
+            "Test set: 2024-25 regular season. ROI and CLV intervals: bootstrap over events (games), "
+            f"{metrics.N_BOOT:,} resamples, seed {metrics.SEED}. Hit-rate intervals are Wilson and treat bets as "
+            "independent (too narrow for pooled 'all books' rows, where one prop is bet at several books). "
+            "CLV is in probability points (Pinnacle close minus Pinnacle T−3h, same line).\n",
+            "## Data counts\n",
+            "```\n" + _json(res["counts"]) + "\n```\n",
+            "T−3h CLV status of same-line sides: " + status + "\n"]
+
+
+def _bar_section(res: dict) -> list[str]:
+    out = ["\n## Pre-registered cells (markets and sides pooled)\n"]
     bar = res["bar"]
     n_cells = len(bar)
     hit = bar[bar["meets_bar"]] if n_cells else bar
@@ -568,10 +594,15 @@ def report_markdown(res: dict, sensitivity: dict | None = None) -> str:
     out.append(f"Cells with n ≥ {MIN_BETS} and ROI lower bound > 0 (regardless of CLV): **{len(pos)}**.\n")
     if len(pos):
         out.append(_cell_md(pos) + "\n")
+    return out
+
+
+def _threshold_sections(res: dict) -> list[str]:
+    out = []
     for t in (DESCRIPTIVE_THRESHOLD,) + THRESHOLDS:
         strict = t == DESCRIPTIVE_THRESHOLD
         for mkt in ("all",) + tuple(STAT):
-            lab = f"edge > 0 (descriptive)" if strict else f"edge ≥ {t:.0%}"
+            lab = "edge > 0 (descriptive)" if strict else f"edge ≥ {t:.0%}"
             out.append(f"\n### {lab}, {MARKET_LABELS[mkt]}\n")
             out.append(_cell_md(cell_table(res["pairs"], t, mkt, strict=strict)))
     out.append("\n## Overs and unders (markets pooled)\n")
@@ -579,38 +610,60 @@ def report_markdown(res: dict, sensitivity: dict | None = None) -> str:
         for side in ("over", "under"):
             out.append(f"\n### edge ≥ {t:.0%}, {side}s\n")
             out.append(_cell_md(cell_table(res["pairs"], t, side=side)))
-    out.append("\n## How far retail books sit from Pinnacle\n")
-    d = res["distance"]
-    out.append(_frame_md(d, pct_cols=("same_line_share", "hold", "share_edge_2pct_over", "share_edge_2pct_under"),
-                         fmt={"mean_abs_line_diff_when_different": "{:.2f}", "mean_p_over_minus_pin": "{:+.4f}",
-                              "mean_abs_p_over_minus_pin": "{:.4f}"}))
-    out.append("\n## Share of same-line retail sides with paper edge at or above each threshold\n")
-    out.append("Props (2024-25 regular season):\n\n")
-    out.append(_frame_md(res["edge_share"], pct_cols=tuple(f">= {t:.0%}" for t in THRESHOLDS)))
+    return out
+
+
+def _distance_sections(res: dict) -> list[str]:
+    shares = tuple(f">= {t:.0%}" for t in THRESHOLDS)
+    out = ["\n## How far retail books sit from Pinnacle\n",
+           _frame_md(res["distance"],
+                     pct_cols=("same_line_share", "hold", "share_edge_2pct_over", "share_edge_2pct_under"),
+                     fmt={"mean_abs_line_diff_when_different": "{:.2f}", "mean_p_over_minus_pin": "{:+.4f}",
+                          "mean_abs_p_over_minus_pin": "{:.4f}"}),
+           "\n## Share of same-line retail sides with paper edge at or above each threshold\n",
+           "Props (2024-25 regular season):\n\n",
+           _frame_md(res["edge_share"], pct_cols=shares)]
     if "totals_benchmark" in res:
         out.append("\nGame totals, same rule (multi-region totals payloads, 2024-25 regular season; "
                    "`early_evening` ≈ T−3h, `true_close` = T−15 min):\n\n")
-        out.append(_frame_md(res["totals_benchmark"], pct_cols=tuple(f">= {t:.0%}" for t in THRESHOLDS)))
-    out.append("\n## Pinnacle calibration (over side, every Pinnacle player-line settled)\n")
-    out.append(_frame_md(res["calibration"], pct_cols=("mean p_over", "over hit rate", "lo", "hi")))
-    out.append("\n## Stale quotes (market last_update more than 60 min before capture), share of test-set outcomes\n")
-    out.append("Age of `last_update` at capture, minutes (quantiles 0.5, 0.99, 1.0): "
-               + ", ".join(f"{v:.2f}" for v in res["last_update_age_minutes"].values()) + "\n\n")
-    out.append(_frame_md(res["stale"], pct_cols=("stale_share",)))
-    out.append("\nDescriptive, added after pre-registration: T−3h bets whose book quotes the same line and side at "
-               "the close, and whether its price was unchanged.\n\n")
-    out.append(_frame_md(res["unchanged"], pct_cols=("same line at close", "price unchanged (of those)",
-                                                     "ROI, unchanged", "ROI, changed")))
-    if "desc_2025" in res:
-        d2 = res["desc_2025"]
-        out.append(f"\n## 2025-26 (descriptive, not graded): {d2['events']} events\n")
-        out.append("```\n" + _json(d2["pair"]) + "\n```\n")
-        out.append(_frame_md(d2["edge_share"], pct_cols=tuple(f">= {t:.0%}" for t in THRESHOLDS)))
-    if sensitivity is not None:
-        out.append("\n## Sensitivity: stale retail and Pinnacle quotes dropped (pre-registered cells)\n")
-        sb = sensitivity["bar"]
-        out.append(f"Cells meeting the bar: **{int(sb['meets_bar'].sum()) if len(sb) else 0}** of {len(sb)}.\n\n")
-        out.append(_cell_md(sb[sb["book"] == "all books"]))
+        out.append(_frame_md(res["totals_benchmark"], pct_cols=shares))
+    return out
+
+
+def _quality_sections(res: dict) -> list[str]:
+    ages = ", ".join(f"{v:.2f}" for v in res["last_update_age_minutes"].values())
+    return ["\n## Pinnacle calibration (over side, every Pinnacle player-line settled)\n",
+            _frame_md(res["calibration"], pct_cols=("mean p_over", "over hit rate", "lo", "hi")),
+            "\n## Stale quotes (market last_update more than 60 min before capture), share of test-set outcomes\n",
+            "Age of `last_update` at capture, minutes (quantiles 0.5, 0.99, 1.0): " + ages + "\n\n",
+            _frame_md(res["stale"], pct_cols=("stale_share",)),
+            "\nDescriptive, added after pre-registration: T−3h bets whose book quotes the same line and side at "
+            "the close, and whether its price was unchanged.\n\n",
+            _frame_md(res["unchanged"], pct_cols=("same line at close", "price unchanged (of those)",
+                                                  "ROI, unchanged", "ROI, changed"))]
+
+
+def _desc_2025_section(res: dict) -> list[str]:
+    if "desc_2025" not in res:
+        return []
+    d2 = res["desc_2025"]
+    return [f"\n## 2025-26 (descriptive, not graded): {d2['events']} events\n",
+            "```\n" + _json(d2["pair"]) + "\n```\n",
+            _frame_md(d2["edge_share"], pct_cols=tuple(f">= {t:.0%}" for t in THRESHOLDS))]
+
+
+def _sensitivity_section(sensitivity: dict | None) -> list[str]:
+    if sensitivity is None:
+        return []
+    sb = sensitivity["bar"]
+    return ["\n## Sensitivity: stale retail and Pinnacle quotes dropped (pre-registered cells)\n",
+            f"Cells meeting the bar: **{int(sb['meets_bar'].sum()) if len(sb) else 0}** of {len(sb)}.\n\n",
+            _cell_md(sb[sb["book"] == "all books"])]
+
+
+def report_markdown(res: dict, sensitivity: dict | None = None) -> str:
+    out = (_intro(res) + _bar_section(res) + _threshold_sections(res) + _distance_sections(res)
+           + _quality_sections(res) + _desc_2025_section(res) + _sensitivity_section(sensitivity))
     return "\n".join(out)
 
 

@@ -104,7 +104,8 @@ def anchor_quotes(lake: pd.DataFrame, games: pd.DataFrame) -> tuple[pd.DataFrame
     m = m[pre]
     counts["rows_last_update_after_tip"] = int(m["last_update_after_tip"].sum())
     m = m[~m["last_update_after_tip"]]
-    bad_points = m["over_point"].isna() | (m["over_point"] != m["under_point"]) | m["over_price"].isna() | m["under_price"].isna()
+    bad_points = (m["over_point"].isna() | (m["over_point"] != m["under_point"])
+                  | m["over_price"].isna() | m["under_price"].isna())
     counts["rows_without_a_clean_totals_quote"] = int(bad_points.sum())
     m = m[~bad_points]
     late = (m["anchor"] == "afternoon") & (m["lead_hours"] < MIN_AFTERNOON_LEAD_HOURS)

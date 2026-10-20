@@ -34,10 +34,10 @@ def stratified_sample(games: pd.DataFrame, per_cell: int, seed: int = 0) -> pd.D
     rng = np.random.default_rng(seed)
     final = games[games["status"] == "final"].copy()
     picks = []
-    for season, g in final.groupby("season"):
+    for _season, g in final.groupby("season"):
         dates = np.sort(g["game_date"].unique())
         cuts = np.array_split(dates, 3)
-        for phase, ds in zip(PHASES, cuts):
+        for phase, ds in zip(PHASES, cuts, strict=True):
             cell = g[g["game_date"].isin(ds)]
             take = min(per_cell, len(cell))
             picks.append(cell.iloc[rng.choice(len(cell), size=take, replace=False)].assign(phase=phase))
@@ -141,13 +141,13 @@ def correlation_check(games: pd.DataFrame, box: pd.DataFrame, params: dict, shif
 
 
 def main() -> int:
-    from nbatotals import params as P
+    from nbatotals import params as params_io
     from nbatotals.evaluate.adapters import legacy_nba_db
 
     frames = legacy_nba_db.load()
     games, box = frames["games"], frames["team_box"].drop(columns=["legacy_pace"])
     games = games[games["season"] <= 2024]
-    prm = P.load()
+    prm = params_io.load()
     sample = stratified_sample(games, per_cell=20)
     res = truncation_check(games, box, prm, sample)
     print(f"truncation: {res['games']} games, {res['values_compared']} values, "

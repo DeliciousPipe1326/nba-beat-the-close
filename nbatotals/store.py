@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS odds_snapshots (
     book         TEXT NOT NULL,
     market       TEXT NOT NULL CHECK (market IN ('totals','spreads','h2h')),
     anchor       TEXT NOT NULL,         -- live: opening, t-10h ... t-15m, close; legacy: legacy_* (see docs/schema.md)
-    captured_utc TEXT,                  -- when the provider was polled; NULL only for legacy rows without a payload match
+    captured_utc TEXT,                  -- when the provider was polled; NULL only for unmatched legacy rows
     commence_utc TEXT,                  -- the event's scheduled tip as the provider reported it at that poll
     lead_minutes REAL,                  -- commence_utc - captured_utc, in minutes (always > 0 for live rows)
     home         TEXT,                  -- aliases as the provider named the teams

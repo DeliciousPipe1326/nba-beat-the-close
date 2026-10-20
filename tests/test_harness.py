@@ -2,8 +2,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from nbatotals import params as P
-from nbatotals.evaluate import backtest, fit, metrics
+from nbatotals import params as params_io
+from nbatotals.evaluate import backtest, metrics
+from nbatotals.model import pace_eff_fit as fit
 from nbatotals.features.pointintime import build_features
 from nbatotals.model.projection import project
 from tests.fixtures import synthetic
@@ -29,7 +30,7 @@ def test_blend_grid_and_size():
 
 def test_closed_form_rmse_matches_direct_projection():
     games, box = synthetic.generate(seasons=(2021, 2022), days=40, games_per_day=6, seed=2)
-    base = P.load()
+    base = params_io.load()
     log, chosen, feats = fit.search(games, box, base, test_seasons=(2022,))
     row = log[(log.l3 == 0.2) & (log.l10 == 0.3) & (log.shrinkage == 10) & (log.pace_weight == 0.75)
               & (log.home_court_total == 1) & (log.b2b_total_per_team == -2)].iloc[0]
@@ -79,7 +80,7 @@ def test_pinnacle_grading_at_an_earlier_anchor():
             rows.append(dict(game_id=gid, book="pinnacle", market="totals", anchor=anchor, line=line,
                              over_price=price, under_price=price))
     odds = pd.DataFrame(rows)
-    base = P.load()
+    base = params_io.load()
     early = backtest.pinnacle_grading(pred, odds, base, backtest.TEMPORAL, anchor="early")
     late = backtest.pinnacle_grading(pred, odds, base, backtest.TEMPORAL)
     e = early[(early.threshold == 0) & (early.season == "pooled")].iloc[0]

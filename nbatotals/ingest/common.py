@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
-class MissingKey(RuntimeError):
+class MissingKeyError(RuntimeError):
     pass
 
 
@@ -44,7 +44,7 @@ def read_dotenv(path: str | os.PathLike | None = None) -> dict[str, str]:
 def get_key(name: str, dotenv: str | os.PathLike | None = None) -> str:
     value = os.environ.get(name) or read_dotenv(dotenv).get(name)
     if not value:
-        raise MissingKey(f"{name} is not set. Put it in .env (see .env.example); it is never committed.")
+        raise MissingKeyError(f"{name} is not set. Put it in .env (see .env.example); it is never committed.")
     return value
 
 

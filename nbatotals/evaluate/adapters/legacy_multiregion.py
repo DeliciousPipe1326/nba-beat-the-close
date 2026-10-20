@@ -119,7 +119,10 @@ def anchor_quotes(raw: pd.DataFrame, games: pd.DataFrame) -> tuple[pd.DataFrame,
     dup = m.duplicated(["game_id", "bucket", "book"], keep="first")
     counts["duplicate_game_bucket_book_rows"] = int(dup.sum())
     m = m[~dup]
-    dec = lambda s: s.map(boxscore.american_to_decimal).astype(float)
+
+    def dec(s):
+        return s.map(boxscore.american_to_decimal).astype(float)
+
     out = pd.DataFrame({
         "game_id": m["game_id"].astype(int), "book": m["book"], "market": "totals", "anchor": m["bucket"],
         "captured_utc": m["polled_utc"], "commence_utc": m["commence_utc"], "lead_hours": m["lead_hours"],
@@ -230,7 +233,10 @@ def market_quotes(raw: pd.DataFrame, games: pd.DataFrame) -> tuple[pd.DataFrame,
     last = own.loc[order].groupby(j["event_id"].loc[order]).transform("last").reindex(own.index)
     tip = own.where(own <= last, last)
     counts["file rows whose tip was moved earlier by a later file"] = int((tip < own).sum())
-    dec = lambda s: s.map(boxscore.american_to_decimal, na_action="ignore").astype(float)
+
+    def dec(s):
+        return s.map(boxscore.american_to_decimal, na_action="ignore").astype(float)
+
     out = pd.DataFrame({
         "game_id": j["game_id"], "season": j["season"].astype(str), "market": j["market"].astype(str),
         "bucket": j["bucket"].astype(str), "book": j["book"].astype(str), "event_id": j["event_id"],
@@ -264,7 +270,10 @@ def side_quotes(raw: pd.DataFrame, games: pd.DataFrame, market: str) -> tuple[pd
     dup = m.duplicated(["game_id", "bucket", "book"], keep="first")
     counts["duplicate_game_bucket_book_rows"] = int(dup.sum())
     m = m[~dup]
-    dec = lambda s: s.map(boxscore.american_to_decimal).astype(float)
+
+    def dec(s):
+        return s.map(boxscore.american_to_decimal).astype(float)
+
     out = pd.DataFrame({
         "game_id": m["game_id"].astype(int), "book": m["book"], "market": market, "anchor": m["bucket"],
         "captured_utc": m["polled_utc"], "commence_utc": m["commence_utc"], "lead_hours": m["lead_hours"],

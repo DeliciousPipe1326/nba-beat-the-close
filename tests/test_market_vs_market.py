@@ -58,7 +58,8 @@ def test_settlement_totals_spreads_h2h_and_pushes():
     r = mvm.settle(["totals", "totals"], ["a", "b"], [221.0, 221.5], [111, 111], [110, 110])
     assert np.isnan(r[0]) and r[1] == 1.0
     # spreads: home wins by 6; a_point is the home handicap
-    assert mvm.settle(["spreads"] * 3, ["a", "a", "b"], [-5.5, -6.5, -5.5], [106] * 3, [100] * 3).tolist() == [1.0, 0.0, 0.0]
+    settled = mvm.settle(["spreads"] * 3, ["a", "a", "b"], [-5.5, -6.5, -5.5], [106] * 3, [100] * 3)
+    assert settled.tolist() == [1.0, 0.0, 0.0]
     assert np.isnan(mvm.settle(["spreads"], ["b"], [-6.0], [106], [100])[0])
 
 
@@ -147,7 +148,8 @@ def _game1():
 def test_pair_bets_settlement_and_clv():
     kept, _ = mvm.clean(pd.DataFrame(_game1()))
     p = mvm.settle_frame(mvm.pair(kept, "exact"), GAMES)
-    assert set(zip(p["market"], p["book"])) == {("totals", "softbook"), ("h2h", "softbook"), ("spreads", "softbook")}
+    assert set(zip(p["market"], p["book"], strict=True)) == {
+        ("totals", "softbook"), ("h2h", "softbook"), ("spreads", "softbook")}
 
     t = p[p["market"] == "totals"].iloc[0]
     p_fair_over = market.devig_two_way(dec(-105), dec(-115))
@@ -229,7 +231,7 @@ def test_lag_table_detects_a_book_that_copies_pinnacle_one_bucket_late():
 
 def test_run_and_report_on_synthetic_games():
     rows = _game1()
-    for i, r in enumerate(list(rows)):
+    for r in list(rows):
         r2 = dict(r, game_id=2, event_id="e2")
         rows.append(r2)
     res = mvm.run(pd.DataFrame(rows), GAMES, seasons=("2023-24",))
