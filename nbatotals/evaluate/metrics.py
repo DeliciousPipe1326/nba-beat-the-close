@@ -37,6 +37,28 @@ def bootstrap_mean_ci(x, n_boot: int = N_BOOT, seed: int = SEED) -> tuple[float,
     return (float(np.quantile(means, 0.025)), float(np.quantile(means, 0.975)))
 
 
+def bootstrap_cluster_mean_ci(x, groups, n_boot: int = N_BOOT, seed: int = SEED) -> tuple[float, float, float]:
+    """Bootstrap the mean of x resampling whole groups (e.g. games) with replacement.
+
+    Returns (lo, hi, se) of the 95% percentile interval and the bootstrap SE.
+    """
+    x = np.asarray(x, dtype=float)
+    if len(x) == 0:
+        return (np.nan, np.nan, np.nan)
+    _, codes = np.unique(np.asarray(groups), return_inverse=True)
+    sums = np.bincount(codes, weights=x)
+    cnts = np.bincount(codes).astype(float)
+    g = len(sums)
+    rng = np.random.default_rng(seed)
+    means = np.empty(n_boot)
+    chunk = max(1, min(500, 5_000_000 // g))
+    for start in range(0, n_boot, chunk):
+        stop = min(n_boot, start + chunk)
+        idx = rng.integers(0, g, size=(stop - start, g))
+        means[start:stop] = sums[idx].sum(axis=1) / cnts[idx].sum(axis=1)
+    return (float(np.quantile(means, 0.025)), float(np.quantile(means, 0.975)), float(means.std(ddof=1)))
+
+
 def ols(y, X: dict) -> dict:
     """OLS of y on an intercept plus the named columns; classic standard errors."""
     names = ["const"] + list(X)

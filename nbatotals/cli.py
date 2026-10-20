@@ -63,7 +63,55 @@ def build_parser() -> argparse.ArgumentParser:
     bt.add_argument("--log", default=None, help="fit log path (default docs/search/fit_log[_<model>].tsv.gz)")
     bt.add_argument("--reuse-fit", action="store_true",
                     help="reuse the odds-free walk-forward fit cached in data/ by an earlier run of the same model")
+    bb = sub.add_parser("backtest-books", help="experiment 3: soft books against Pinnacle at the same poll "
+                                              "(docs/experiments/book_lag)")
+    bb.add_argument("--legacy", action="store_true", required=True,
+                    help="use $NBA_LEGACY_DB (scores) and $NBA_LEGACY_MULTIREGION (all three markets)")
+    bb.add_argument("--out", default=None, help="report path (default docs/experiments/book_lag/report.md)")
+    bb.add_argument("--reuse-quotes", action="store_true",
+                    help="reuse the parsed payloads cached in data/ by an earlier run (git-ignored)")
     return p
+
+
+def cmd_backtest_books(args) -> int:
+    import pickle
+
+    from nbatotals.evaluate import market_vs_market as mvm
+    from nbatotals.evaluate.adapters import legacy_lake, legacy_multiregion, legacy_nba_db
+
+    for var in (legacy_nba_db.ENV_VAR, legacy_multiregion.ENV_VAR):
+        if not os.environ.get(var):
+            print(f"{var} is required", file=sys.stderr)
+            return 2
+    old = os.environ.pop(legacy_lake.ENV_VAR, None)
+    try:
+        games = legacy_nba_db.load()["games"]
+    finally:
+        if old is not None:
+            os.environ[legacy_lake.ENV_VAR] = old
+    seasons = mvm.DESCRIPTIVE_SEASONS + mvm.TEST_SEASONS
+    cache = ROOT / "data" / "book_lag_raw.pkl"
+    if args.reuse_quotes and cache.exists():
+        raw = pickle.loads(cache.read_bytes())
+        print(f"reusing parsed payloads from {cache}", file=sys.stderr)
+    else:
+        print("reading payloads ...", file=sys.stderr)
+        raw = legacy_multiregion.read_market_files(seasons=seasons)
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_bytes(pickle.dumps(raw))
+    quotes, counts = legacy_multiregion.market_quotes(raw, games)
+    res = mvm.run(quotes, games, progress=lambda m: print(m, file=sys.stderr))
+    md = mvm.report_markdown(res)
+    join = "\n".join(f"- {k}: {v:,}" for k, v in counts.items())
+    md = md.replace("## Quote hygiene\n", f"## Quote hygiene\n\nEvent join (Amendment 2 rule):\n\n{join}\n", 1)
+    out = Path(args.out or ROOT / "docs" / "experiments" / "book_lag" / "report.md")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(md)
+    for mkt in mvm.MARKETS:
+        print(f"\n## {mkt}: top of the per-book table (2%, buckets pooled, exact lines)\n")
+        print(mvm.pooled_table(res["pooled"]["exact"], mkt, top=8))
+    print(f"\nfull report: {out}")
+    return 0
 
 
 def cmd_backtest(args) -> int:
@@ -182,4 +230,6 @@ def main(argv: list[str] | None = None) -> int:
         return legacy_nba_db.main([])
     if args.command == "backtest":
         return cmd_backtest(args)
+    if args.command == "backtest-books":
+        return cmd_backtest_books(args)
     return 2

@@ -19,14 +19,19 @@ ANCHOR_LABELS = {"opening": "opening", "t-10h": "T−10h", "t-5h": "T−5h", "t-
                  "t-1h": "T−1h", "t-15m": "T−15 min", "close": "close (last pre-tip poll)"}
 
 
+def devig_two_way(price_a, price_b):
+    """Multiplicative two-way devig of decimal prices: p_a = (1/a) / (1/a + 1/b)."""
+    inv_a, inv_b = 1.0 / price_a, 1.0 / price_b
+    return inv_a / (inv_a + inv_b)
+
+
 def consensus(odds: pd.DataFrame, params: dict) -> pd.DataFrame:
     m = params["market"]
     t = odds[(odds["market"] == "totals") & odds["over_price"].notna() & odds["under_price"].notna()
              & odds["line"].notna()].copy()
     t["raw_median"] = t.groupby(["game_id", "anchor"])["line"].transform("median")
     t = t[(t["line"] - t["raw_median"]).abs() <= m["outlier_points"]]
-    inv_o, inv_u = 1.0 / t["over_price"], 1.0 / t["under_price"]
-    t["p_over"] = inv_o / (inv_o + inv_u)
+    t["p_over"] = devig_two_way(t["over_price"], t["under_price"])
     extra = {}
     if "captured_utc" in t:
         extra["captured_utc"] = ("captured_utc", "max")
