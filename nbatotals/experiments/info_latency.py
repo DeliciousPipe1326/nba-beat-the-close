@@ -280,8 +280,8 @@ def run(out: Path) -> dict:
     gc = {}
     for name in ("lineup_pace_eff", "pace_eff", PLACEBO):
         p = preds[name].merge(groups, on="game_id", how="left")
-        for label, sel in (("lineup change", p["lineup_change"] == True),  # noqa: E712
-                           ("no change", p["lineup_change"] == False)):  # noqa: E712
+        for label, sel in (("lineup change", p["lineup_change"].eq(True)),
+                           ("no change", p["lineup_change"].eq(False))):
             gc[(name, label)] = cells(p[sel].drop(columns="lineup_change"), w)
     sides = {n: clv_by_side(preds[n], w) for n in ("lineup_pace_eff", "pace_eff")}
     paired = paired_clv(preds["lineup_pace_eff"], preds["pace_eff"], w)

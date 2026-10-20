@@ -326,6 +326,7 @@ every anchor from the raw payloads' own timestamps rather than trusting labels.
 | `nbatotals/experiments/`, `nbatotals/features/players.py` | Experiment 2: input gate, report, player inputs for `lineup_pace_eff` |
 | `docs/` | Pre-registration, results, full backtest reports, schema, features; `docs/experiments/` for later pre-registered experiments |
 | `tests/` | Offline tests on synthetic data, including the leakage self-test |
+| `scripts/check.sh` | Lint, types, complexity budget and tests in one command ([docs/CODE_QUALITY.md](docs/CODE_QUALITY.md)) |
 
 ## Licence and data
 

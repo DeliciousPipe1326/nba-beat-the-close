@@ -73,7 +73,7 @@ def test_lake_join_flags_in_play_quotes(tmp_path, monkeypatch):
     odds = frames["odds_raw"]
     totals = odds[odds["market"] == "totals"]
     assert totals["lake_match"].all()
-    assert (totals["parse_mismatch"] == False).all()  # noqa: E712
+    assert totals["parse_mismatch"].eq(False).all()
     in_play = totals[totals["in_play"]]
     assert set(zip(in_play["game_id"], in_play["anchor"], strict=True)) == {(101, "legacy_open")}
     assert (in_play["lead_hours"] < 0).all()
