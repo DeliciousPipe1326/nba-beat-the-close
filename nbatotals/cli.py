@@ -70,6 +70,11 @@ def build_parser() -> argparse.ArgumentParser:
     bb.add_argument("--out", default=None, help="report path (default docs/experiments/book_lag/report.md)")
     bb.add_argument("--reuse-quotes", action="store_true",
                     help="reuse the parsed payloads cached in data/ by an earlier run (git-ignored)")
+    bp = sub.add_parser("backtest-props", help="Experiment 4: retail player props vs Pinnacle (docs/experiments/props_market)")
+    bp.add_argument("--legacy", action="store_true", required=True,
+                    help="use the maintainer's prop payloads ($NBA_LEGACY_PROPS), props DB ($NBA_LEGACY_PROPS_DB) and "
+                         "games DB ($NBA_LEGACY_DB); $NBA_LEGACY_MULTIREGION adds the game-totals benchmark")
+    bp.add_argument("--out", default=None, help="full report path (default docs/experiments/props_market/backtest_props_report.md)")
     return p
 
 
@@ -111,6 +116,28 @@ def cmd_backtest_books(args) -> int:
         print(f"\n## {mkt}: top of the per-book table (2%, buckets pooled, exact lines)\n")
         print(mvm.pooled_table(res["pooled"]["exact"], mkt, top=8))
     print(f"\nfull report: {out}")
+def cmd_backtest_props(args) -> int:
+    from nbatotals.evaluate import props_market as pm
+    from nbatotals.evaluate.adapters import legacy_multiregion, legacy_nba_db, legacy_props
+
+    missing = [v for v in (legacy_props.ENV_PROPS, legacy_props.ENV_PROPS_DB, legacy_nba_db.ENV_VAR) if not os.environ.get(v)]
+    if missing:
+        print(f"required: {', '.join(missing)}", file=sys.stderr)
+        return 2
+    raw, read_counts = legacy_props.read_files()
+    games = legacy_props.read_games()
+    box = legacy_props.read_player_box()
+    totals = None
+    if os.environ.get(legacy_multiregion.ENV_VAR):
+        totals, _ = legacy_multiregion.anchor_quotes(legacy_multiregion.read_files(), games)
+    res = pm.run(raw, read_counts, games, box, totals_quotes=totals)
+    sens = pm.run(raw, read_counts, games, box, drop_stale=True)
+    out = Path(args.out or ROOT / "docs" / "experiments" / "props_market" / "backtest_props_report.md")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(pm.report_markdown(res, sensitivity=sens))
+    bar = res["bar"]
+    print(f"cells: {len(bar)}; meeting the evidence bar: {int(bar['meets_bar'].sum()) if len(bar) else 0}")
+    print(f"full report: {out}")
     return 0
 
 
@@ -232,4 +259,6 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_backtest(args)
     if args.command == "backtest-books":
         return cmd_backtest_books(args)
+    if args.command == "backtest-props":
+        return cmd_backtest_props(args)
     return 2
