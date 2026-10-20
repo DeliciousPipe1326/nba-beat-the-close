@@ -86,6 +86,12 @@ mypy 2.4.0, radon 6.0.1.
 | vulture, 80% confidence | 2 unused variables | 0 |
 | tests | 126 passed, 2 skipped | 157 passed, 3 skipped (all three maintainer-only) |
 
+Reports were regenerated after the pass to check nothing moved: at 5be5739,
+`docs/backtest_legacy_report.md`, `docs/backtest_legacy_report_lineup_pace_eff.md`
+and `docs/experiments/info_latency/report.md` come out byte for byte the same
+(`backtest --legacy --reuse-fit` and `python -m nbatotals.experiments.info_latency`
+on the maintainer's data).
+
 The two maintainability grades did not improve. The index penalises module
 size, and splitting long functions into named steps added lines. Both modules
 are an experiment's whole harness plus its report. Moving each report's
