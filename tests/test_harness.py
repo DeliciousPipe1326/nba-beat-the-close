@@ -67,3 +67,23 @@ def test_clv_sign():
     d = backtest._bets(pred, w, "early", "proj", backtest.TEMPORAL)
     assert d["clv_pts"].tolist() == [2.0, -2.0]  # over gained 2 points, under lost 2
     assert d["clv_cents"].iloc[0] > 0 > d["clv_cents"].iloc[1]
+
+
+def test_pinnacle_grading_at_an_earlier_anchor():
+    """Graded against Pinnacle's own line and price at the anchor asked for; default is the reference."""
+    pred = pd.DataFrame({"game_id": [1, 2], "season": 2022, "proj": [230.0, 210.0], "proj_default": 0.0,
+                         "actual": [226, 215], "both_10": True})
+    rows = []
+    for gid, early, late in ((1, 224.0, 228.0), (2, 216.0, 213.0)):
+        for anchor, line, price in (("early", early, 2.0), ("afternoon", late, 1.9)):
+            rows.append(dict(game_id=gid, book="pinnacle", market="totals", anchor=anchor, line=line,
+                             over_price=price, under_price=price))
+    odds = pd.DataFrame(rows)
+    base = P.load()
+    early = backtest.pinnacle_grading(pred, odds, base, backtest.TEMPORAL, anchor="early")
+    late = backtest.pinnacle_grading(pred, odds, base, backtest.TEMPORAL)
+    e = early[(early.threshold == 0) & (early.season == "pooled")].iloc[0]
+    l_ = late[(late.threshold == 0) & (late.season == "pooled")].iloc[0]
+    # early: over 224 (226 wins), under 216 (215 wins); afternoon: over 228 (loses), under 213 (loses)
+    assert (e["n"], e["wins"]) == (2, 2) and e["real_roi"] == pytest.approx(1.0)
+    assert (l_["n"], l_["wins"]) == (2, 0) and l_["real_roi"] == pytest.approx(-1.0)

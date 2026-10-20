@@ -1,7 +1,7 @@
 """Team identity: every table keys teams by the 3-letter alias below.
 
-Sources name teams differently (BallDontLie integer ids, The Odds API full
-names). Everything is mapped to these aliases at ingest time.
+Sources name teams differently (BallDontLie integer ids, NBA Stats ids, The
+Odds API full names). Everything is mapped to these aliases at ingest time.
 """
 
 ALIASES = (

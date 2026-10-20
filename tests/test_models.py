@@ -32,7 +32,7 @@ def test_registry_lists_and_validates():
 @pytest.mark.parametrize("name", sorted(registry.PROJECTORS))
 def test_every_projector_fits_and_predicts(league, prm, name):
     games, box = league
-    p = registry.get(name)
+    p = synthetic.projector(name, games)
     train = games[games.season == 2021]
     state = p.fit(train, box[box.game_id.isin(train.id)], prm)
     targets = games[games.season == 2022]
