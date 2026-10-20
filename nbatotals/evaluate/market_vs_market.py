@@ -387,6 +387,9 @@ def run(quotes: pd.DataFrame, games: pd.DataFrame, seasons=TEST_SEASONS, progres
     res["by_anchor"] = by_anchor(test["exact"], test["exact"])
     res["by_anchor_converted"] = by_anchor(test["converted"], test["converted"])
     res["by_season"] = _by_season(test["exact"])
+    res["overall"] = pd.DataFrame([{"mode": m, "threshold": t, "market": mkt,
+                                    **cell(b[(b["market"] == mkt) & (b["edge"] >= t)])}
+                                   for m, b in test.items() for t in THRESHOLDS for mkt in MARKETS])
     res["discrepancy"] = discrepancy_by_book(test["exact"])
     log("lag")
     res["lag"] = lag_table(c, seasons)
@@ -600,6 +603,12 @@ def report_markdown(res: dict) -> str:
         w(f"### {mkt}: per book and anchor, 2% (exact lines), sorted by bets\n")
         w(book_anchor_table(res["book_anchor"], mkt))
         w("")
+
+    w("## All soft books and buckets pooled, every threshold\n")
+    ov = res["overall"]
+    rows = [[r["mode"], f"{r['threshold']:.0%}", r["market"]] + _cell_cols(r) for _, r in ov.iterrows()]
+    w(_table(["lines", "edge ≥", "market"] + CELL_HEAD, rows))
+    w("")
 
     w("## Overall picture by anchor (all soft books pooled, exact lines)\n")
     for key, title in (("by_anchor", "exact lines"), ("by_anchor_converted", "converted lines")):
