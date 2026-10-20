@@ -292,7 +292,7 @@ projected minutes showed more than twice the formula's closing-line value from
 the opening anchor, but every such input available to this study was a
 pre-game file of unknown capture time that evidently contained news from late
 in the game day, so the result is an upper bound, not a measurement
-(`docs/experiments/info_latency/RESULTS.md`, once that experiment is merged).
+([docs/experiments/info_latency/RESULTS.md](docs/experiments/info_latency/RESULTS.md)).
 
 Whether a morning lineup projection carries information the noon line has not
 priced can only be answered with projections and odds captured live at fixed,
