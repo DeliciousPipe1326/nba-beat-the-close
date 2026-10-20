@@ -239,6 +239,64 @@ what the output looks like, nothing more: its teams, scores and lines are not
 real. Real projections need your own API keys and the steps in Quick start;
 `python -m nbatotals report` then renders the day's CSV in the same layout.
 
+## Backfilling history
+
+To test your own model on past seasons you need past odds. `backfill-odds` fills
+your local store from The Odds API's historical endpoint with your own
+`THEODDS_API_KEY`; `backtest --store` then runs the same walk-forward harness
+on it:
+
+```bash
+python -m nbatotals ingest-games --season 2023 --season 2024
+```
+
+```bash
+python -m nbatotals ingest-box --season 2023 --season 2024
+```
+
+```bash
+python -m nbatotals backfill-odds --season 2024 --dry-run
+```
+
+```bash
+python -m nbatotals backfill-odds --season 2024 --max-credits 100000
+```
+
+```bash
+python -m nbatotals backtest --store --model elo_total
+```
+
+The backtest needs odds for the season you test and box scores for at least
+one earlier season, because every parameter is fitted on earlier seasons only.
+Its report goes to `out/` (git-ignored).
+
+**Cost.** Historical odds cost 10 credits per market per region per call, at
+the provider's published rate. The command reads the real cost from the first
+response and re-checks the budget. Run on the real 2024-25 schedule (1,321
+games), the dry run plans **4,520 calls** at the default anchors (opening,
+T−10h, T−5h, T−1h, T−15 min), totals only, regions us and eu: **about 90,000
+credits** (up to about 127,000 if openings need later snapshots). With all three
+markets and four regions it is about 540,000. Games are grouped so that games in
+the same 5-minute snapshot window share a call, and nothing already stored is
+fetched again.
+
+**What it refuses to do**, each a defect found in the author's earlier data
+(see "Lessons" below):
+
+- request snapshots at fixed clock times: every anchor is a lead before that
+  game's own tip, and the snapshot's real timestamp is stored next to the lead
+  that was asked for;
+- join a quote to a game by the request date: events are matched by their own
+  commence time and team names;
+- keep anything polled at or after tip, or any book updated at or after tip
+  (dropped and counted);
+- spend credits before printing the plan and its cost and getting a yes
+  (`--yes` skips only the prompt), or past the credits remaining or
+  `--max-credits`. `--dry-run` makes no request at all.
+
+**Licence.** The Odds API's terms do not allow redistributing the data you
+fetch. It stays in your git-ignored `data/` store; commit nothing fetched.
+
 ## Every knob in `config/params.yaml`
 
 Fitted means the backtest re-chose it per season from earlier seasons only.
@@ -291,8 +349,8 @@ and report every variant you tried, not just the best one.
 - **The legacy data is private.** The backtest ran on the author's own
   BallDontLie and The Odds API history, which cannot be redistributed, so
   `python -m nbatotals backtest --legacy` is maintainer-only. Everyone else
-  rebuilds history with their own keys through the ingesters; past odds need The
-  Odds API's paid historical endpoint.
+  rebuilds history with their own keys through the ingesters and
+  `backfill-odds` (see "Backfilling history"), then runs `backtest --store`.
 - **Live box scores are summed from player rows.** BallDontLie's `/stats` has
   no team-turnover line, so live possessions can sit slightly below those from
   the official team totals the backtest used. The size of that difference has
@@ -339,7 +397,7 @@ every anchor from the raw payloads' own timestamps rather than trusting labels.
 | `nbatotals/features/pointintime.py` | Point-in-time team features (cut-off: rows dated before the game) |
 | `nbatotals/model/` | Projector interface (`base.py`), registry, the pre-registered formula (`projection.py`, `pace_eff.py`) and the two examples |
 | `nbatotals/evaluate/` | Consensus and devig, walk-forward fit, grading, leakage checks, legacy adapters |
-| `nbatotals/ingest/` | BallDontLie, The Odds API, Dunks & Threes stub |
+| `nbatotals/ingest/` | BallDontLie, The Odds API (live polling and `theodds_history` backfill), Dunks & Threes stub |
 | `nbatotals/today.py`, `nbatotals/cli.py` | The `today` CSV and the command line |
 | `config/params.yaml` | Every number the engine uses |
 | `nbatotals/experiments/`, `nbatotals/features/players.py` | Experiment 2: input gate, report, player inputs for `lineup_pace_eff` |

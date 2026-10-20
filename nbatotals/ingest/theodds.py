@@ -95,7 +95,7 @@ def _event_base(ev: dict, captured: dt.datetime, skipped: dict) -> dict | None:
 
 
 def _book_rows(ev: dict, b: dict, base: dict, skipped: dict) -> list[dict]:
-    if b.get("last_update") and _ts(b["last_update"]) > _ts(ev["commence_time"]):
+    if b.get("last_update") and _ts(b["last_update"]) >= _ts(ev["commence_time"]):  # at or after tip: in play
         skipped["book_updated_after_tip"] += 1
         return []
     rows = []

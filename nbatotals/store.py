@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS odds_snapshots (
     captured_utc TEXT,                  -- when the provider was polled; NULL only for unmatched legacy rows
     commence_utc TEXT,                  -- the event's scheduled tip as the provider reported it at that poll
     lead_minutes REAL,                  -- commence_utc - captured_utc, in minutes (always > 0 for live rows)
+    nominal_lead_minutes REAL,          -- backfill-odds: the lead that was requested (the anchor's definition)
     home         TEXT,                  -- aliases as the provider named the teams
     away         TEXT,
     line         REAL,                  -- totals: the total; spreads: home spread; h2h: NULL
@@ -116,4 +117,16 @@ def connect(path: str | Path = DEFAULT_DB) -> sqlite3.Connection:
     con = sqlite3.connect(path)
     con.execute("PRAGMA foreign_keys = ON")
     con.executescript(SCHEMA)
+    _migrate(con)
     return con
+
+
+# Columns added after a store may already exist: (table, column, type). Additive only.
+MIGRATIONS = (("odds_snapshots", "nominal_lead_minutes", "REAL"),)
+
+
+def _migrate(con: sqlite3.Connection) -> None:
+    for table, column, kind in MIGRATIONS:
+        have = {r[1] for r in con.execute(f"PRAGMA table_info({table})")}  # table names are module constants
+        if column not in have:
+            con.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")

@@ -50,6 +50,18 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--out", default=None, help="CSV path, default out/today_<date>.csv (git-ignored)")
     t.add_argument("--model", default=None,
                    help="registered projector (default pace_eff); see nbatotals/model/registry.py")
+    bf = with_db(sub.add_parser("backfill-odds", help="fill odds_snapshots for a past season from The Odds API "
+                                                      "historical endpoint (costs credits; asks first)"))
+    bf.add_argument("--season", type=int, required=True, help="season start year, e.g. 2024 for 2024-25")
+    bf.add_argument("--anchors", default=None,
+                    help="comma list (default opening,t-10h,t-5h,t-1h,t-15m; aliases noon, afternoon, near_close, "
+                         "true_close)")
+    bf.add_argument("--markets", default="totals", help="comma list of totals, spreads, h2h (default totals)")
+    bf.add_argument("--regions", default="us,eu", help="comma list of us, us2, uk, eu, au (default us,eu)")
+    bf.add_argument("--books", default=None, help="comma list of bookmaker keys (replaces --regions)")
+    bf.add_argument("--max-credits", type=int, default=None, help="never spend more than this")
+    bf.add_argument("--dry-run", action="store_true", help="print the plan and its cost; make no request")
+    bf.add_argument("--yes", action="store_true", help="skip the confirmation prompt (the credit checks still apply)")
     sub.add_parser("demo", help="the whole pipeline offline on a made-up league: out/demo_today.csv and "
                                 "out/demo_report.html (no keys needed)")
     r = sub.add_parser("report", help="render a today CSV as one self-contained HTML page")
@@ -57,8 +69,13 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--out", default=None, help="HTML path (default out/report_<date>.html, git-ignored)")
     sub.add_parser("verify-legacy", help="read $NBA_LEGACY_DB and print row-count checks")
     bt = sub.add_parser("backtest", help="walk-forward backtest (docs/RESULTS.md)")
-    bt.add_argument("--legacy", action="store_true", required=True,
-                    help="use the maintainer's legacy DB ($NBA_LEGACY_DB) and raw odds payloads")
+    src = bt.add_mutually_exclusive_group(required=True)
+    src.add_argument("--legacy", action="store_true",
+                     help="use the maintainer's legacy DB ($NBA_LEGACY_DB) and raw odds payloads")
+    src.add_argument("--store", action="store_true",
+                     help="use your local store: games and box scores from ingest-games/ingest-box, odds from "
+                          "backfill-odds or poll-odds (report in out/, git-ignored)")
+    bt.add_argument("--db", default=str(ROOT / "data" / "nbatotals.db"), help="local store for --store")
     bt.add_argument("--market", choices=("true-close", "temporal"), default="true-close",
                     help="true-close: multi-region payloads with a T-15 min close ($NBA_LEGACY_MULTIREGION), the "
                          "pre-registered primary; temporal: the older 3-a-day payloads ($NBA_LEGACY_ODDS_LAKE), "
@@ -165,6 +182,8 @@ def _projector(name: str | None):
 
 
 def cmd_backtest(args) -> int:
+    if args.store:
+        return cmd_backtest_store(args)
     from nbatotals import params as params_io
     from nbatotals.evaluate import backtest
     from nbatotals.evaluate.adapters import legacy_lake, legacy_multiregion, legacy_nba_db
@@ -323,6 +342,70 @@ def cmd_store(args) -> int:
     return 0
 
 
+def _split(value: str | None) -> list[str] | None:
+    return [v.strip() for v in value.split(",") if v.strip()] if value else None
+
+
+def cmd_backfill(args) -> int:
+    import json
+
+    from nbatotals import params as params_io
+    from nbatotals import store
+    from nbatotals.ingest import common, theodds_history
+
+    con = store.connect(args.db)
+    try:
+        summary = theodds_history.backfill(
+            con, params_io.load(args.params), args.season, anchors=_split(args.anchors),
+            markets=_split(args.markets), regions=_split(args.regions), books=_split(args.books),
+            max_credits=args.max_credits, dry_run=args.dry_run, confirm=(lambda text: True) if args.yes else None)
+    except (common.MissingKeyError, common.ApiError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        con.close()
+    print(json.dumps({k: v for k, v in summary.items() if k != "plan"}, indent=2, default=str))
+    return 0 if not summary["stopped"] or summary["dry_run"] else 3
+
+
+def cmd_backtest_store(args) -> int:
+    import pandas as pd
+
+    from nbatotals import data, store
+    from nbatotals import params as params_io
+    from nbatotals.evaluate import backtest
+    from nbatotals.model import registry
+
+    con = store.connect(args.db)
+    try:
+        games, box = data.load_frames(con)
+        quotes = pd.read_sql_query("SELECT * FROM odds_snapshots WHERE market = 'totals' AND game_id IS NOT NULL "
+                                   "AND anchor NOT LIKE 'legacy_%'", con)
+    finally:
+        con.close()
+    if quotes.empty:
+        print(f"{args.db}: no totals odds; run backfill-odds (or poll-odds) first", file=sys.stderr)
+        return 2
+    spec = backtest.store_spec(quotes["anchor"].unique())
+    ref_seasons = set(games.loc[games["id"].isin(quotes.loc[quotes["anchor"] == spec.ref, "game_id"]), "season"])
+    box_seasons = set(games.loc[games["id"].isin(box["game_id"]), "season"])
+    seasons = tuple(sorted(int(s) for s in ref_seasons if any(b < s for b in box_seasons)))
+    if not seasons:
+        print("need odds at the reference anchor for a season and box scores for an earlier one", file=sys.stderr)
+        return 2
+    projector = _projector(args.model)
+    suffix = "" if projector.name == registry.DEFAULT else f"_{projector.name}"
+    res = backtest.run(games, box, quotes, params_io.load(args.params), spec=spec, projector=projector,
+                       test_seasons=seasons, log_path=args.log or str(ROOT / "out" / f"fit_log_store{suffix}.tsv.gz"))
+    out = Path(args.out or ROOT / "out" / f"backtest_store_report{suffix}.md")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(backtest.report_markdown(res))
+    print(f"## Per-season results against {spec.labels[spec.ref]} (your store)\n")
+    print(backtest.headline_table(res))
+    print(f"\nfull report: {out}")
+    return 0
+
+
 def cmd_demo(args) -> int:
     from nbatotals import demo
 
@@ -354,7 +437,8 @@ def cmd_verify_legacy(args) -> int:
 
 STORE_COMMANDS = ("init", "ingest-games", "ingest-box", "ingest-injuries", "poll-odds", "today")
 COMMANDS = {"verify-legacy": cmd_verify_legacy, "backtest": cmd_backtest, "backtest-books": cmd_backtest_books,
-            "backtest-props": cmd_backtest_props, "demo": cmd_demo, "report": cmd_report}
+            "backtest-props": cmd_backtest_props, "demo": cmd_demo, "report": cmd_report,
+            "backfill-odds": cmd_backfill}
 
 
 def main(argv: list[str] | None = None) -> int:

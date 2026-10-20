@@ -65,6 +65,27 @@ THRESHOLDS = (0, 1, 2, 3, 4, 6)
 BREAKEVEN_110 = 110 / 210
 
 
+STORE_ORDER = ("opening", "t-10h", "t-5h", "t-3h", "t-2h", "t-1h", "t-15m", "close")
+
+
+def store_spec(anchors) -> MarketSpec:
+    """The market spec for odds in a local store (live polling or backfill-odds): the reference is
+    T−15 min if present, else the live `close`, else the latest anchor; CLV from every earlier one."""
+    present = [a for a in STORE_ORDER if a in set(anchors)]
+    if not present:
+        raise ValueError(f"no known anchors among {sorted(set(anchors))}; expected some of {STORE_ORDER}")
+    ref = "t-15m" if "t-15m" in present else ("close" if "close" in present else present[-1])
+    clv_from = tuple(a for a in present if a not in (ref, "close") and STORE_ORDER.index(a) < STORE_ORDER.index(ref))
+    pretip = "t-10h" if "t-10h" in clv_from else (clv_from[0] if clv_from else ref)
+    return MarketSpec(anchors=clv_from + (ref,), ref=ref, clv_from=clv_from, pretip=pretip,
+                      headline_clv=clv_from[:2], labels={a: market.ANCHOR_LABELS[a] for a in present})
+
+
+def _seasons(pred: pd.DataFrame) -> list:
+    """The test seasons present in the predictions, ascending, then "pooled"."""
+    return sorted(pd.unique(pred["season"]).tolist()) + ["pooled"]
+
+
 def season_label(s) -> str:
     return "pooled" if s == "pooled" else f"{s}-{str(s + 1)[-2:]}"
 
@@ -191,7 +212,7 @@ def grading(pred: pd.DataFrame, w: pd.DataFrame, spec: MarketSpec = TRUE_CLOSE) 
                 b = bets if cut == "all" else bets[bets["both_10"]]
                 for t in THRESHOLDS:
                     bt = b[b["edge"] != 0] if t == 0 else b[b["edge"].abs() >= t]
-                    for s in list(TEST_SEASONS) + ["pooled"]:
+                    for s in _seasons(pred):
                         x = bt if s == "pooled" else bt[bt["season"] == s]
                         rows.append({"run": run, "anchor": anchor, "cut": cut, "threshold": t, "season": s,
                                      **_grade(x, anchor, spec)})
@@ -203,7 +224,7 @@ def grading(pred: pd.DataFrame, w: pd.DataFrame, spec: MarketSpec = TRUE_CLOSE) 
 def accuracy(pred: pd.DataFrame, w: pd.DataFrame, spec: MarketSpec = TRUE_CLOSE) -> pd.DataFrame:
     d = pred.merge(w, on="game_id", how="left")
     rows = []
-    for s in list(TEST_SEASONS) + ["pooled"]:
+    for s in _seasons(pred):
         x = d if s == "pooled" else d[d["season"] == s]
         row: dict[str, Any] = {"season": s}
         for anchor in spec.anchors:
@@ -222,7 +243,7 @@ def blend_regression(pred: pd.DataFrame, w: pd.DataFrame, spec: MarketSpec = TRU
     d = d[d[f"line_{spec.ref}"].notna()]
     rows = []
     for run, col in (("tuned", "proj"), ("default", "proj_default")):
-        for s in list(TEST_SEASONS) + ["pooled"]:
+        for s in _seasons(pred):
             x = d if s == "pooled" else d[d["season"] == s]
             r = metrics.ols(x["actual"], {"market": x[f"line_{spec.ref}"], "model": x[col]})
             rows.append({"run": run, "season": s, "n": r["n"],
@@ -235,7 +256,7 @@ def edge_vs_move(pred: pd.DataFrame, w: pd.DataFrame, spec: MarketSpec = TRUE_CL
     rows = []
     for anchor in spec.clv_from:
         y = d[d[f"line_{anchor}"].notna() & d[f"line_{spec.ref}"].notna()]
-        for s in list(TEST_SEASONS) + ["pooled"]:
+        for s in _seasons(pred):
             x = y if s == "pooled" else y[y["season"] == s]
             r, lo, hi, n = metrics.corr_ci(x["proj"] - x[f"line_{anchor}"], x[f"line_{spec.ref}"] - x[f"line_{anchor}"])
             rows.append({"anchor": anchor, "season": s, "n": n, "r": r, "lo": lo, "hi": hi})
@@ -259,7 +280,7 @@ def evidence(g: pd.DataFrame, spec: MarketSpec = TRUE_CLOSE) -> dict:
         out[f"c2_clv_{anchor}_ci_above_0"] = bool(c["clv_lo"] > 0)
     # The pre-registered CLV criterion names the pretip anchor; spec.pretip says which anchor stands in for it.
     out["edge"] = (out["c1_lower_bound_above_52.38"] and out["c1_each_season_above_50"]
-                   and out[f"c2_clv_{spec.pretip}_ci_above_0"] and out["c3_real_roi_ci_above_0"])
+                   and out.get(f"c2_clv_{spec.pretip}_ci_above_0", False) and out["c3_real_roi_ci_above_0"])
     flags = g[(g["n"] >= 1) & ((g["cover_lo"] > BREAKEVEN_110) | (g.get("clv_lo", pd.Series(dtype=float)) > 0))]
     out["cells_clearing_a_bar"] = flags[["run", "anchor", "cut", "threshold", "season", "n", "cover", "cover_lo",
                                          "clv_pts", "clv_lo"]]
@@ -281,23 +302,24 @@ def pinnacle_grading(pred: pd.DataFrame, odds: pd.DataFrame, base: dict, spec: M
     rows = []
     for t in THRESHOLDS:
         bt = bets[bets["edge"] != 0] if t == 0 else bets[bets["edge"].abs() >= t]
-        for s in list(TEST_SEASONS) + ["pooled"]:
+        for s in _seasons(pred):
             x = bt if s == "pooled" else bt[bt["season"] == s]
             rows.append({"threshold": t, "season": s, **_grade(x, anchor, at)})
     return pd.DataFrame(rows)
 
 
 def run(games, box, odds, base, spec: MarketSpec = TRUE_CLOSE, progress=None, log_path=None, fitted=None,
-        projector=None) -> dict:
+        projector=None, test_seasons=TEST_SEASONS) -> dict:
     """`fitted` = (pred, fits, log_rows) from an earlier `predictions` call, to skip the odds-free grid."""
     cons = market.consensus(odds, base)
     cons, order_dropped = market.enforce_anchor_order(cons, spec.ref)
     w = market.wide(cons)
     if fitted is None:
-        fitted = predictions(games, box, base, progress=progress, log_path=log_path, projector=projector)
+        fitted = predictions(games, box, base, test_seasons=test_seasons, progress=progress, log_path=log_path,
+                             projector=projector)
     pred, fits, log_rows = fitted
     g = grading(pred, w, spec)
-    sanity = market.sanity_table(cons, games[games["season"] <= max(TEST_SEASONS)], spec.labels)
+    sanity = market.sanity_table(cons, games[games["season"] <= max(pred["season"])], spec.labels)
     order = {v: i for i, v in enumerate(spec.labels[a] for a in spec.anchors)}
     sanity = sanity.sort_values(["season", "anchor"], key=lambda c: c.map(order) if c.name == "anchor" else c)
     out = {
@@ -331,7 +353,7 @@ def headline_table(res: dict) -> str:
     spec = res["spec"]
     g = res["grading"]
     rows = []
-    for s in list(TEST_SEASONS) + ["pooled"]:
+    for s in _seasons(res["pred"]):
         primary = (g.run == "tuned") & (g.cut == "all") & (g.threshold == 0) & (g.season == s)
         c = g[primary & (g.anchor == spec.ref)].iloc[0]
         row = [season_label(s), f"{int(c.n):,}", f"{_pct(c.cover)} ({_pct(c.cover_lo)}–{_pct(c.cover_hi)})",
@@ -355,7 +377,7 @@ def clv_table(res: dict) -> str:
     g = g[(g.run == "tuned") & (g.cut == "all") & (g.threshold == 0)]
     rows = []
     for a in spec.clv_from:
-        for s in list(TEST_SEASONS) + ["pooled"]:
+        for s in _seasons(res["pred"]):
             c = g[(g.anchor == a) & (g.season == s)].iloc[0]
             rows.append([spec.labels[a], season_label(s), f"{int(c.clv_n):,}",
                          f"{c.clv_pts:+.2f} ({c.clv_lo:+.2f} to {c.clv_hi:+.2f})",
@@ -383,7 +405,7 @@ def grading_table(res: dict, run="tuned", cut="all") -> str:
     rows = []
     for anchor in spec.anchors:
         for t in THRESHOLDS:
-            for s in list(TEST_SEASONS) + ["pooled"]:
+            for s in _seasons(res["pred"]):
                 c = g[(g.anchor == anchor) & (g.threshold == t) & (g.season == s)].iloc[0]
                 clv = "n/a" if anchor == spec.ref else (
                     f"{c.clv_pts:+.2f} ({c.clv_lo:+.2f}, {c.clv_hi:+.2f}); {c.clv_cents:+.2f}¢" if c.clv_n else "–")
@@ -421,12 +443,12 @@ def accuracy_table(res: dict) -> str:
     a = res["accuracy"]
     labels = res["labels"]
     rows = []
-    for r in a.itertuples():
+    for r in a.to_dict("records"):  # records, not itertuples: anchor names like "t-15m" are not identifiers
         for anchor in (spec.ref,) + spec.clv_from:
-            rows.append([season_label(r.season), labels[anchor], f"{getattr(r, f'n_{anchor}'):,}",
-                         f"{getattr(r, f'mae_proj_{anchor}'):.2f}", f"{getattr(r, f'mae_default_{anchor}'):.2f}",
-                         f"{getattr(r, f'mae_line_{anchor}'):.2f}", f"{getattr(r, f'rmse_proj_{anchor}'):.2f}",
-                         f"{getattr(r, f'rmse_default_{anchor}'):.2f}", f"{getattr(r, f'rmse_line_{anchor}'):.2f}"])
+            rows.append([season_label(r["season"]), labels[anchor], f"{r[f'n_{anchor}']:,}",
+                         f"{r[f'mae_proj_{anchor}']:.2f}", f"{r[f'mae_default_{anchor}']:.2f}",
+                         f"{r[f'mae_line_{anchor}']:.2f}", f"{r[f'rmse_proj_{anchor}']:.2f}",
+                         f"{r[f'rmse_default_{anchor}']:.2f}", f"{r[f'rmse_line_{anchor}']:.2f}"])
     return _table(["season", "games with this anchor", "n", "MAE model (tuned)", "MAE model (default)", "MAE line",
                    "RMSE model (tuned)", "RMSE model (default)", "RMSE line"], rows)
 
