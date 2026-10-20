@@ -58,6 +58,53 @@ projection "gets there first" at noon is **not established**, because the input
 file carries news from after noon. By the pre-registered rule, neither number
 counts as information a noon bettor could have had.
 
+## Provenance of the Dunks & Threes inputs
+
+*Added after the results, at the orchestrating review's request, from Dunks &
+Threes' methodology page (October 2026, supplied by the owner). No number in
+this file changed and nothing was re-run.*
+
+The page states three things:
+
+- (a) game predictions and projected minutes update with known injuries during
+  the day, and within 30 minutes of tip-off they update more often, using
+  official player status;
+- (b) for 2024-25 and 2025-26 the API returns the predictions published before
+  each game at the time; for earlier seasons it returns re-predictions by the
+  current model, retrained before each season on earlier seasons only, with
+  some design choices made with recent seasons in view;
+- (c) Expected EPM never includes games played on that date.
+
+What that means for these results:
+
+1. **The late-news signature is what (a) predicts.** The archived file is the
+   final pre-tip version, so it carries injury and lineup news up to about 30
+   minutes before tip. That is why the projection still predicts line moves from
+   the ~2 h and ~1 h anchors. It also confirms the reading above: the noon CLV
+   is an upper bound, not something a noon bettor had.
+2. **2022-23 and 2023-24 are upper bounds for a second reason: model vintage.**
+   Their inputs are re-predictions by a later model whose design choices saw
+   recent seasons. Even with no timing issue, their CLV is not what a bettor
+   using DnT at the time would have had. (2021-22, also a re-prediction, is a
+   training season only.)
+3. **2024-25 is the only test season whose file is what was published
+   pre-game.** Its per-season numbers are the only ones from a live-published
+   file: opening **+1.08** (+0.92 to +1.24), noon **+0.49** (+0.38 to +0.61),
+   late evening **+0.26** (+0.19 to +0.34) (report.md §1b). Its late-evening
+   CLV is the largest of the three seasons, which fits a file captured close to
+   tip. The gate's 2024-25 flag fits too: more absences anticipated and fewer
+   surprise scratches (GATE.md). Even this season is a final pre-tip version, so
+   it is an upper bound on what was knowable at noon.
+4. **(c) is consistent with gate G2.** The rating change into a game is unrelated
+   to that game's performance (0.016) and strongly related to the game before
+   (0.456). The page does not say whether the earlier seasons' ratings are also
+   re-computed by a later model. If they are, point 2 applies to the placebo and
+   to the rating half of lineup_pace_eff as well.
+
+The verdicts do not change: the information bar is partly supported (the
+repricing is availability news; "getting there first" at noon is not
+established), and there is no edge.
+
 ## CLV by anchor, to the true close (T−15 min)
 
 Tuned models, every game, threshold 0, pooled 2022-23 to 2024-25 (report.md §1).

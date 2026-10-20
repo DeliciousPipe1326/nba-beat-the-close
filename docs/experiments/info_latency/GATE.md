@@ -49,6 +49,15 @@ DnT projected out after a 25+ minute game did sit out (1,609 of 1,609). That fit
 DnT zeroing only players already ruled out, since 25–30% of absences were still
 unanticipated.
 
+**Provenance (added after the results, from DnT's methodology page, October
+2026):** DnT says its archived game predictions are the final pre-tip version,
+updated with official player status in the last 30 minutes. For 2024-25 on they
+are the predictions published at the time; earlier seasons are re-predictions by
+a later model. That explains this flag: 2024-25 is a different kind of file. It
+also means G1 shows "made before tip", not "made by noon". DnT also says Expected
+EPM never includes games on that date, which agrees with G2. See RESULTS.md,
+"Provenance of the Dunks & Threes inputs".
+
 ## Matching and join
 
 Players: DnT names were matched to the BallDontLie player box by normalised name
