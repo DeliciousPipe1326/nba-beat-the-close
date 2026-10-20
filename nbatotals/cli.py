@@ -63,6 +63,9 @@ def build_parser() -> argparse.ArgumentParser:
     bf.add_argument("--yes", action="store_true", help="skip the confirmation prompt (the credit checks still apply)")
     sub.add_parser("demo", help="the whole pipeline offline on a made-up league: out/demo_today.csv and "
                                 "out/demo_report.html (no keys needed)")
+    nm = sub.add_parser("new-model", help="write nbatotals/model/<name>.py from the template in "
+                                          "docs/YOUR_FIRST_MODEL.md and register it")
+    nm.add_argument("name", help="lowercase letters, digits and underscores, e.g. my_model")
     r = sub.add_parser("report", help="render a today CSV as one self-contained HTML page")
     r.add_argument("--csv", default=None, help="CSV from `today` (default out/today_<today>.csv)")
     r.add_argument("--out", default=None, help="HTML path (default out/report_<date>.html, git-ignored)")
@@ -382,6 +385,9 @@ def cmd_backtest_store(args) -> int:
     from nbatotals.evaluate import backtest
     from nbatotals.model import registry
 
+    if args.market_type != "totals":
+        print("backtest --store grades totals only; --market-type spreads/h2h runs with --legacy", file=sys.stderr)
+        return 2
     con = store.connect(args.db)
     try:
         games, box = data.load_frames(con)
@@ -434,6 +440,18 @@ def cmd_report(args) -> int:
     return 0
 
 
+def cmd_new_model(args) -> int:
+    from nbatotals import scaffold
+
+    try:
+        path = scaffold.new_model(args.name)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(f"written: {path}\nregistered: {args.name} in nbatotals/model/registry.py\n{scaffold.next_steps(args.name)}")
+    return 0
+
+
 def cmd_verify_legacy(args) -> int:
     from nbatotals.evaluate.adapters import legacy_nba_db
 
@@ -443,7 +461,7 @@ def cmd_verify_legacy(args) -> int:
 STORE_COMMANDS = ("init", "ingest-games", "ingest-box", "ingest-injuries", "poll-odds", "today")
 COMMANDS = {"verify-legacy": cmd_verify_legacy, "backtest": cmd_backtest, "backtest-books": cmd_backtest_books,
             "backtest-props": cmd_backtest_props, "demo": cmd_demo, "report": cmd_report,
-            "backfill-odds": cmd_backfill}
+            "backfill-odds": cmd_backfill, "new-model": cmd_new_model}
 
 
 def main(argv: list[str] | None = None) -> int:

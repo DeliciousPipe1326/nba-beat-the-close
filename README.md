@@ -4,6 +4,8 @@
 
 A toolkit for testing NBA betting models honestly. You bring your own API keys and your own model idea. It gives you the data, a baseline model, and a referee.
 
+**Who this is for.** This is not an app. There is no website, no screen, no button, and nothing to install beyond Python. You use it from a terminal, you write a short Python class to add a model, and you read tables. You should be comfortable with Python and pandas, with running commands and a scheduled job, and with getting your own API keys. If that is not you, the useful part of this repository is the result and the method, which you can read without running anything.
+
 **What it does**
 
 1. **Collects data** into a local database: games, box scores, and bookmaker odds for totals, spreads and moneyline, each odds quote stamped with when it was captured. Live from today onward, or backfilled for past seasons if you pay for history.
@@ -91,7 +93,8 @@ The second is the point of the repository.
 
 2. **Test your own model on past seasons:** keys in `.env`, build the store,
    check the cost with a dry run, then backfill; write and register a projector
-   (["Building on this"](#building-on-this)) and grade it. See
+   ([docs/YOUR_FIRST_MODEL.md](docs/YOUR_FIRST_MODEL.md), a ten-minute
+   walkthrough, and ["Building on this"](#building-on-this)) and grade it. See
    ["Backfilling history"](#backfilling-history).
 
    ```bash
@@ -180,7 +183,10 @@ a bug until checks rule that out (see RESULTS.md for the eight it went through).
 ## Building on this
 
 The harness grades any projection the same way, so you can test your own model
-without touching it. A projector is a class with a `name`, a `fit` and a
+without touching it. New to this? Start with
+[docs/YOUR_FIRST_MODEL.md](docs/YOUR_FIRST_MODEL.md), a ten-minute walkthrough;
+`python -m nbatotals new-model my_model` writes and registers the template it
+uses. A projector is a class with a `name`, a `fit` and a
 `predict` (the interface is in [nbatotals/model/base.py](nbatotals/model/base.py)).
 The harness hands it `games` (one row per game: date, season, teams, scores
 when final) and `box` (one row per team per game: possessions, points, pace and
@@ -476,6 +482,7 @@ every anchor from the raw payloads' own timestamps rather than trusting labels.
 | `docs/` | Pre-registration, results, full backtest reports, schema, features; `docs/experiments/` for later pre-registered experiments |
 | `tests/` | Offline tests on synthetic data, including the leakage self-test |
 | `nbatotals/demo.py`, `nbatotals/report.py`, `nbatotals/synthetic.py` | The offline demo, the HTML report and the made-up league both use |
+| `nbatotals/scaffold.py`, `docs/YOUR_FIRST_MODEL.md` | `new-model` and the walkthrough whose template it writes |
 | `scripts/check.sh` | Lint, types, complexity budget and tests in one command ([docs/CODE_QUALITY.md](docs/CODE_QUALITY.md)) |
 
 ## Licence and data

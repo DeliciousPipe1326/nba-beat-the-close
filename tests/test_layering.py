@@ -1,7 +1,7 @@
 """The layering rule (docs/CODE_QUALITY.md): nothing lower imports anything higher.
 
     foundations (teams, boxscore, params, cache, synthetic) -> ingest -> store/data -> features -> model
-    -> evaluate -> experiments -> today/report/demo/cli
+    -> evaluate -> experiments -> today/report/demo/scaffold/cli
 
 A module may import its own layer or any lower one. Experiments sit beside the
 evaluator: they may import it, it may not import them.
@@ -22,6 +22,7 @@ RANK = {
     "nbatotals.evaluate": 5,
     "nbatotals.experiments": 6,
     "nbatotals.today": 7, "nbatotals.report": 7, "nbatotals.demo": 7, "nbatotals.cli": 7, "nbatotals.__main__": 7,
+    "nbatotals.scaffold": 7,
 }
 
 
