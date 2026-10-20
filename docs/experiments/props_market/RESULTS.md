@@ -1,6 +1,6 @@
 # Experiment 4 results: player props against Pinnacle
 
-Rules: [PREREGISTRATION.md](PREREGISTRATION.md) (committed in `2000850` before
+Rules: [PREREGISTRATION.md](PREREGISTRATION.md) (committed in `1963b73` before
 any quote was joined to a box score). Every table here comes from the generated
 report, [backtest_props_report.md](backtest_props_report.md), which
 `python -m nbatotals backtest-props --legacy` regenerates byte for byte. Test

@@ -3,7 +3,7 @@
 Computed 20 October 2026 with `python -m nbatotals.experiments.info_latency_gate`
 (needs NBA_LEGACY_DB, NBA_LEGACY_DNT, NBA_LEGACY_PLAYER_EPM, NBA_LEGACY_PROPS_DB),
 against the thresholds committed in [PREREGISTRATION.md](PREREGISTRATION.md)
-(82c0373) before any of these numbers existed. No odds were read.
+(98a89f7) before any of these numbers existed. No odds were read.
 
 ## Outcome
 

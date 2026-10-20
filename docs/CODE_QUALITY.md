@@ -67,7 +67,7 @@ module constants.
 
 ## Numbers before and after this pass
 
-Measured on 20 October 2026: before at f1bbfae (main after the five experiment
+Measured on 20 October 2026: before at 48c3481 (main after the five experiment
 merges); after at the end of the pass, which also includes the demo, report,
 backfill-odds and new-model commands added in the same pass. Same tool versions: ruff 0.17.1,
 mypy 2.4.0, radon 6.0.1.
@@ -86,7 +86,7 @@ mypy 2.4.0, radon 6.0.1.
 | vulture, 80% confidence | 2 unused variables | 0 |
 | tests | 126 passed, 2 skipped | 157 passed, 3 skipped (all three maintainer-only) |
 
-Reports were regenerated after the pass to check nothing moved: at 5be5739,
+Reports were regenerated after the pass to check nothing moved: at 707b48d,
 `docs/backtest_legacy_report.md`, `docs/backtest_legacy_report_lineup_pace_eff.md`
 and `docs/experiments/info_latency/report.md` come out byte for byte the same
 (`backtest --legacy --reuse-fit` and `python -m nbatotals.experiments.info_latency`

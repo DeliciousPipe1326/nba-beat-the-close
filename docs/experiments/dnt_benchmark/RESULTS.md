@@ -1,7 +1,7 @@
 # Results: Experiment 1, Dunks & Threes benchmark
 
 Run 20 October 2026. Pre-registration: [PREREGISTRATION.md](PREREGISTRATION.md),
-committed (082b039) before any gate metric was computed. Every number below is
+committed (cea3d82) before any gate metric was computed. Every number below is
 from [gate_report.md](gate_report.md), which
 `python -m nbatotals.evaluate.dnt_gate` regenerates byte for byte (maintainer
 only: needs `NBA_LEGACY_DB`, `NBA_LEGACY_PROPS_DB` and `NBA_DNT_BOX`).
