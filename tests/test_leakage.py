@@ -56,7 +56,7 @@ def test_every_registered_projector_passes_truncation(league, prm, name):
     games, box = league
     sample = leakage.stratified_sample(games, per_cell=35)
     assert len(sample) >= 200
-    res = leakage.projector_truncation_check(registry.get(name), games, box, prm, sample)
+    res = leakage.projector_truncation_check(synthetic.projector(name, games), games, box, prm, sample)
     assert res["mismatches"] == []
 
 

@@ -32,6 +32,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from nbatotals.features.players import dnt_games  # noqa: F401  (re-exported for the gate)
 from nbatotals.teams import BDL_ID_TO_ALIAS, NBA_STATS_ID_TO_ALIAS
 
 DNT_ENV = "NBA_LEGACY_DNT"
@@ -92,22 +93,6 @@ def read_player_epm(path=None, through: str | None = None) -> pd.DataFrame:
     out = out.drop_duplicates(["player_id", "game_id"]).rename(columns={"game_dt": "date"})
     out["team"] = out["team_id"].map(NBA_STATS_ID_TO_ALIAS)
     return out.sort_values(["date", "game_id", "player_id"]).reset_index(drop=True)
-
-
-def dnt_games(dnt: pd.DataFrame, games: pd.DataFrame) -> pd.DataFrame:
-    """Map DnT game ids to this project's games by Eastern date plus both team aliases.
-
-    Returns columns dnt_game_id, game_id, game_date, home, away (inner join;
-    DnT games that match nothing, or match ambiguously, are dropped).
-    """
-    pairs = dnt.groupby(["date", "game_id"])["team"].agg(lambda s: tuple(sorted(set(s)))).reset_index()
-    pairs = pairs[pairs["team"].map(len) == 2]
-    g = games[["id", "game_date", "home", "away"]].copy()
-    g["team"] = [tuple(sorted(x)) for x in zip(g["home"], g["away"])]
-    m = pairs.merge(g, left_on=["date", "team"], right_on=["game_date", "team"])
-    m = m[~m.duplicated("game_id", keep=False) & ~m.duplicated("id", keep=False)]
-    return m.rename(columns={"game_id": "dnt_game_id", "id": "game_id"})[
-        ["dnt_game_id", "game_id", "game_date", "home", "away"]].reset_index(drop=True)
 
 
 # --------------------------------------------------------------------------- actual player box (BallDontLie)

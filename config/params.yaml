@@ -130,3 +130,13 @@ models:
     season_carry: 0.5       # ratings are multiplied by this at each new season
     league_prior_games: 100 # games of weight on the base league total early in a season
     fallback_total: 222.0   # base league total when no earlier season is available
+  # Experiment 2 (docs/experiments/info_latency/PREREGISTRATION.md): pace_eff's formula
+  # with each team's pace, offence and defence from that game's projected minutes and
+  # player ratings (Dunks & Threes). Needs NBA_LEGACY_DNT and NBA_LEGACY_PLAYER_EPM.
+  lineup_pace_eff:
+    scale: 1.0                         # untuned default: points per 100 per point of team EPM
+    scale_grid: [0.5, 0.75, 1.0, 1.25, 1.5]   # declared grid; fit picks by RMSE on earlier seasons
+    shrinkage: 0                       # untuned default: team-games of shrinkage (lambda = n/(n+k); 0 = none)
+    shrinkage_grid: [0, 5, 10, 20]     # declared grid
+    home_court_total: 2.0              # fixed: pace_eff's fitted value for 2022-23 (from 2021-22 only)
+    b2b_total_per_team: 1.0            # fixed: same source

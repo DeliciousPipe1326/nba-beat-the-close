@@ -102,9 +102,16 @@ the same leakage test; full results are in
   prices, CLV +0.59 points from the opening and +0.14 from noon, test RMSE 18.2
   to 18.7.
 
-**Tier B** (optional, not built): player-level EPM from Dunks & Threes behind
-your own key. `nbatotals/ingest/dunksandthrees.py` is a documented stub. Nothing
-in the results says anything about it.
+**Tier B** (experimental): `lineup_pace_eff`, the same formula with each team's
+pace, offence and defence taken from that game's Dunks & Threes projected
+minutes and player EPM. It was tested in its own pre-registered experiment
+([docs/experiments/info_latency/](docs/experiments/info_latency/RESULTS.md)) on
+the maintainer's archived DnT files. Measured: 49.8% cover against the true close,
+−5.0% at real prices, CLV +0.85 points from the opening and +0.43 from noon. But
+it also predicts line moves in the last two hours before tip, so the archived
+files hold late same-day news and the noon CLV is not something a noon bettor
+could have had. No edge. Live DnT ingestion is still a stub
+(`nbatotals/ingest/dunksandthrees.py`).
 
 **The harness.** Walk-forward fitting, devigged consensus, pushes excluded,
 every bet graded at its own price, CLV in points and cents, Wilson and bootstrap
@@ -234,6 +241,9 @@ Fixed means it never did.
 | `models.elo_total.season_carry` | 0.5 | `elo_total` only: ratings are multiplied by this at each new season. |
 | `models.elo_total.league_prior_games` | 100 | `elo_total` only: weight, in games, of the base league total early in a season. |
 | `models.elo_total.fallback_total` | 222.0 | `elo_total` only: base league total when no earlier season is in the store. |
+| `models.lineup_pace_eff.scale / scale_grid` | 1.0 / 0.5–1.5 | `lineup_pace_eff` only: points per 100 possessions per point of minutes-weighted team EPM. Fitted from the grid (chose 1.25, 1.0, 1.0). |
+| `models.lineup_pace_eff.shrinkage / shrinkage_grid` | 0 / 0, 5, 10, 20 | `lineup_pace_eff` only: team deviations scaled by n/(n+k), n = team games so far. Fitted (chose 5, 5, 0). |
+| `models.lineup_pace_eff.home_court_total / b2b_total_per_team` | 2.0 / 1.0 | `lineup_pace_eff` only: fixed at pace_eff's 2022-23 fit (from 2021-22 alone). |
 
 If you change a fitted or fixed value and want to know whether it helps, re-run
 a backtest on data you collect yourself, pre-register what you expect first,
@@ -283,7 +293,8 @@ every anchor from the raw payloads' own timestamps rather than trusting labels.
 | `nbatotals/ingest/` | BallDontLie, The Odds API, Dunks & Threes stub |
 | `nbatotals/today.py`, `nbatotals/cli.py` | The `today` CSV and the command line |
 | `config/params.yaml` | Every number the engine uses |
-| `docs/` | Pre-registration, results, full backtest reports, schema, features |
+| `nbatotals/experiments/`, `nbatotals/features/players.py` | Experiment 2: input gate, report, player inputs for `lineup_pace_eff` |
+| `docs/` | Pre-registration, results, full backtest reports, schema, features; `docs/experiments/` for later pre-registered experiments |
 | `tests/` | Offline tests on synthetic data, including the leakage self-test |
 
 ## Licence and data

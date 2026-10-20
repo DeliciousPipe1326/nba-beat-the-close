@@ -263,19 +263,24 @@ def evidence(g: pd.DataFrame, spec: MarketSpec = TRUE_CLOSE) -> dict:
     return out
 
 
-def pinnacle_grading(pred: pd.DataFrame, odds: pd.DataFrame, base: dict, spec: MarketSpec) -> pd.DataFrame:
-    """Secondary: grade against Pinnacle's own line and devigged price at the reference anchor."""
+def pinnacle_grading(pred: pd.DataFrame, odds: pd.DataFrame, base: dict, spec: MarketSpec,
+                     anchor: str | None = None) -> pd.DataFrame:
+    """Secondary: grade against Pinnacle's own line and devigged price at `anchor` (default: the reference)."""
+    import dataclasses
+
     from nbatotals import params as P
 
-    pin = odds[(odds["book"] == "pinnacle") & (odds["anchor"] == spec.ref)]
+    anchor = anchor or spec.ref
+    at = dataclasses.replace(spec, ref=anchor)  # graded at that anchor's own line and price; no CLV
+    pin = odds[(odds["book"] == "pinnacle") & (odds["anchor"] == anchor)]
     cons = market.consensus(pin, P.with_overrides(base, {"market.min_books": 1}))
-    bets = _bets(pred, market.wide(cons), spec.ref, "proj", spec)
+    bets = _bets(pred, market.wide(cons), anchor, "proj", at)
     rows = []
     for t in THRESHOLDS:
         bt = bets[bets["edge"] != 0] if t == 0 else bets[bets["edge"].abs() >= t]
         for s in list(TEST_SEASONS) + ["pooled"]:
             x = bt if s == "pooled" else bt[bt["season"] == s]
-            rows.append({"threshold": t, "season": s, **_grade(x, spec.ref, spec)})
+            rows.append({"threshold": t, "season": s, **_grade(x, anchor, at)})
     return pd.DataFrame(rows)
 
 
