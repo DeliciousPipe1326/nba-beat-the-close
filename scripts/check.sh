@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
-# Lint, type-check, complexity budget and tests. Run from the repository root.
+# Lint, type-check, complexity budget and tests. Run from the repository root with your virtual environment active (or set PYTHON=path/to/python).
 # See docs/CODE_QUALITY.md. Exits non-zero on the first failing step.
 set -eu
-PY=${PYTHON:-python}
+PY=${PYTHON:-$(command -v python3 || command -v python)}
 echo "== ruff"
 "$PY" -m ruff check nbatotals tests scripts
 echo "== mypy"
